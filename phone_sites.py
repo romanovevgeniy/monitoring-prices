@@ -20,6 +20,8 @@ MTS_CATEGORIES = ["/catalog/smartfony/samsung/", "/catalog/gadzhety/planshety/sa
 SAMSUNGSTORE_CATEGORIES = ["/catalog/smartfony_galaxy/", "/catalog/galaxy_tabs/", "/catalog/galaxy_watches/",
                            "/catalog/naushniki/"]
 USED = re.compile(r"b-u|kak-novyj|uczenk|utsenen|vosstanovl", re.I)
+# Зарубежные версии у продавцов маркетплейса М.Видео — не российский товар
+FOREIGN = re.compile(r"global|глобал|\(eu\)|\beu\b|\bhk\b|india|индия|\(cn\)|китай|международ|/ds\b|\bnf\b", re.I)
 
 
 class Offer:
@@ -65,12 +67,19 @@ class MVideo:
         price = lambda x: (x.get("price") or {}).get("salePrice") or 10 ** 12  # noqa: E731
         cands = sorted((x for x in self.items if matches(spec, x.get("name", ""))), key=price)
         in_stock = [x for x in cands if x.get("status") == "available" and not x.get("soldOut")]
-        # сначала в наличии, затем остальные — по возрастанию цены; первая карточка самого М.Видео
-        for x in in_stock + [x for x in cands if x not in in_stock]:
+        ordered = in_stock + [x for x in cands if x not in in_stock]
+        # 1) карточка самого М.Видео — сначала в наличии, по возрастанию цены
+        for x in ordered:
             if await self.is_own(x["productId"]):
                 note = "" if x in in_stock else " (сейчас нет в наличии)"
                 return f"https://www.mvideo.ru/products/{x['productId']}", f"{len(cands)} карточек, выбрана М.Видео{note}"
-        return None, "нет карточки самого М.Видео" if cands else "нет в каталоге М.Видео"
+        # 2) своей нет — самый дешёвый продавец маркетплейса, без зарубежных версий (Global, EU, HK …)
+        for x in ordered:
+            if not FOREIGN.search(x.get("name", "")):
+                note = "" if x in in_stock else ", сейчас нет в наличии"
+                return (f"https://www.mvideo.ru/products/{x['productId']}",
+                        f"{len(cands)} карточек, своей у М.Видео нет — продавец маркетплейса{note}")
+        return None, "только зарубежные версии" if cands else "нет в каталоге М.Видео"
 
 
 # ---------- DNS ----------

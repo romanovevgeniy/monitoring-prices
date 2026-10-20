@@ -66,9 +66,10 @@ def ld_result(html, url):
     if offer is None:
         raise StoreError("на странице нет данных о цене (schema.org Product)")
     price, in_stock, _ = offer
-    if not price or not in_stock:
-        return Result(None, url, "нет в наличии")
-    return Result(price, url)
+    if not price:
+        return Result(None, url, "нет в наличии, цена не указана")
+    # Нет в наличии, но цена на сайте указана — записываем цену (так ведётся ручной мониторинг)
+    return Result(price, url, "" if in_stock else "нет в наличии, цена указана")
 
 
 async def http_ld(client: httpx.AsyncClient, url, **_):

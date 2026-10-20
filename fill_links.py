@@ -147,7 +147,13 @@ async def fill(args):
     src_articles = set(names)
     rows = [(r, a) for r, a in rows if a in src_articles]  # только артикулы из выбранной таблицы
 
-    jobs = {s: [(r, a) for r, a in rows if not (args.only_empty and ws.cell(r, col_of[s]).value)] for s in stores}
+    def skip(r, s):
+        v = str(ws.cell(r, col_of[s]).value or "").strip()
+        if args.only_missing:  # заполняем только пустые и «-»
+            return v.startswith("http")
+        return args.only_empty and bool(v)
+
+    jobs = {s: [(r, a) for r, a in rows if not skip(r, s)] for s in stores}
     progress = run.Progress({s: len(v) for s, v in jobs.items()})
     print(f"Всего: {progress.total} артикулов × магазинов")
     run.emit("plan", total=progress.total, stores=[{"name": STORES[s], "total": len(v)} for s, v in jobs.items()])
@@ -249,6 +255,7 @@ def parse_args():
     p.add_argument("--file", required=True, help="таблица мониторинга (тип — по заголовкам)")
     p.add_argument("--links", help=f"файл ссылок (по умолчанию {LINKS_FILE} в папке проекта)")
     p.add_argument("--only-empty", action="store_true", help="заполнять только пустые ячейки")
+    p.add_argument("--only-missing", action="store_true", help="заполнять пустые ячейки и ячейки с «-»")
     p.add_argument("--json", action="store_true", help="события прогресса для приложения")
     p.add_argument("--stop-file", help="если файл появится — остановиться и сохранить собранное")
     return p.parse_args()

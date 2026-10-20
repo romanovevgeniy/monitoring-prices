@@ -126,8 +126,12 @@ def matches(spec, site_name):
         size = SIZE.search(site_name)
         if not size or int(size.group(1)) != spec.size:
             return False
-    if spec.color and not any(w in site_name.lower() for w in COLORS[spec.color]):
-        return False
+    if spec.color:
+        low = site_name.lower()
+        same = any(w in low for w in COLORS[spec.color])
+        other = any(w in low for c, words in COLORS.items() if c != spec.color for w in words)
+        if not same and other:
+            return False
     if spec.conn:
         c = _conn(site_name)
         if spec.conn == "lte" and c != "lte":

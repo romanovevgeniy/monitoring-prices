@@ -71,11 +71,27 @@ def write_table(table, src_path, dst_path, results, base_src_path=None):
 
 
 def detect_table(path):
-    """Тип таблицы (элемент config.TABLES с file=path) по заголовкам первой строки или None."""
-    from config import TABLES
+    """Тип таблицы по заголовкам первой строки и колонки по заголовкам → элемент config.TABLES с file=path, или None."""
+    from openpyxl.utils import get_column_letter
+    from config import HEADER_WORDS, TABLES
     ws = openpyxl.load_workbook(path, read_only=True).active
-    header = {c.coordinate: str(c.value or "").lower() for c in next(ws.iter_rows(max_row=1))}
+    header = {}
+    for c in next(ws.iter_rows(max_row=1)):
+        if c.value is not None and getattr(c, "column", None):
+            header[get_column_letter(c.column)] = str(c.value).lower()
+    joined = " ".join(header.values())
+
+    def find(key):
+        return next((col for col, text in header.items() if any(w in text for w in HEADER_WORDS[key])), None)
+
     for t in TABLES:
-        if all(frag in header.get(cell, "") for cell, frag in t["signature"].items()):
-            return dict(t, file=str(path))
+        if not all(w in joined for w in t["signature"]):
+            continue
+        found = dict(t, file=str(path))
+        found["article_col"] = find("article") or t["article_col"]
+        if t.get("name_col"):
+            found["name_col"] = find("name") or t["name_col"]
+        found["price_cols"] = {s: find(s) or col for s, col in t["price_cols"].items()}
+        found["base_col"] = find("base") or t["base_col"]
+        return found
     return None

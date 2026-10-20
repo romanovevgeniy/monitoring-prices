@@ -98,7 +98,9 @@ def selected_tables(args):
         if not t:
             sys.exit(f"Не удалось определить тип таблицы по заголовкам: {args.file}")
         return [t]
-    return [dict(t, file=str(ROOT / t["file"])) for t in TABLES if not args.tables or t["name"] in args.tables]
+    # колонки — по заголовкам файла (detect_table), а не по буквам из config
+    return [detect_table(ROOT / t["file"]) or dict(t, file=str(ROOT / t["file"]))
+            for t in TABLES if not args.tables or t["name"] in args.tables]
 
 
 def output_dir(args):
