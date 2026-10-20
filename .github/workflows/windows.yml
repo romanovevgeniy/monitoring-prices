@@ -1,0 +1,26 @@
+# Сборка установщика «Мониторинг цен» для Windows в облаке GitHub.
+# Запуск: вкладка Actions → «Сборка для Windows» → Run workflow. Готовый установщик — в Artifacts.
+name: Сборка для Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Сборка
+        shell: pwsh
+        run: ./build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Мониторинг цен — установка
+          path: dist/*.exe

@@ -1,0 +1,16 @@
+# окружения и сборка
+.venv/
+.venv-win/
+build/
+dist/
+app/.build/
+*.app/
+__pycache__/
+
+# рабочие данные пользователя — не в репозиторий
+.browser-profile/
+results/
+*.xlsx
+*.csv
+Резервные копии*/
+.DS_Store
