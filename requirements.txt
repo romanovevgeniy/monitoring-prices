@@ -1,6 +1,7 @@
 openpyxl==3.1.5
 playwright==1.60.0
 httpx==0.28.1
-PySide6>=6.7
+# 6.11+ не запускается после сборки PyInstaller (ImportError: …shiboken6\libshiboken does not exist)
+PySide6>=6.7,<6.11
 # только для сборки иконки .ico
 Pillow

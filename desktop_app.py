@@ -41,6 +41,11 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from paths import APP_DIR, DATA_DIR, FROZEN  # noqa: E402
 
+if len(sys.argv) > 1 and sys.argv[1] == "--selftest":  # проверка сборки: Qt загружается, окно создаётся
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    QApplication(sys.argv[:1])
+    sys.exit(0)
+
 APP_NAME = "Мониторинг цен"
 FEED_LIMIT = 300
 GREEN, ORANGE, RED, GRAY = "#2e9e4f", "#d9822b", "#d64545", "#8a8a8e"
