@@ -109,7 +109,8 @@ final class AppModel {
         if !wrongFolder { runner = MonitorRunner(project: project) }
     }
 
-    func setSource(_ url: URL) {
+    func setSource(_ chosen: URL) {
+        let url = adoptIntoRoot(chosen)
         sourceFile = url
         detectedTable = nil
         availableStores = []
@@ -156,6 +157,41 @@ final class AppModel {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         rootDirectory = url
         UserDefaults.standard.set(url, forKey: "rootDirectory")
+        if let sourceFile { setSource(sourceFile) }  // выбранная таблица переезжает в «Таблицы»
+    }
+
+    /// Папка рабочих таблиц в основной папке.
+    var tablesDirectory: URL? { rootDirectory?.appending(path: "Таблицы") }
+
+    /// Таблица из другого места копируется в «Таблицы» основной папки, дальше работаем с копией.
+    /// Если там уже есть другой файл с тем же именем — спрашиваем: заменить (старый — в резервные копии) или оставить.
+    private func adoptIntoRoot(_ url: URL) -> URL {
+        guard let dir = tablesDirectory,
+              url.deletingLastPathComponent().standardizedFileURL.path != dir.standardizedFileURL.path else { return url }
+        let fm = FileManager.default
+        let dst = dir.appending(path: url.lastPathComponent)
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            if fm.fileExists(atPath: dst.path) {
+                if fm.contentsEqual(atPath: url.path, andPath: dst.path) { return dst }
+                let alert = NSAlert()
+                alert.messageText = "В «Таблицы» уже есть «\(url.lastPathComponent)»"
+                alert.informativeText = "Заменить его выбранным файлом? Прежний сохранится в «Таблицы/Резервные копии таблиц»."
+                alert.addButton(withTitle: "Заменить")
+                alert.addButton(withTitle: "Оставить прежний")
+                guard alert.runModal() == .alertFirstButtonReturn else { return dst }
+                let backups = dir.appending(path: "Резервные копии таблиц")
+                try fm.createDirectory(at: backups, withIntermediateDirectories: true)
+                let stamp = Date.now.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false))
+                    .replacingOccurrences(of: ":", with: "-")
+                let stem = url.deletingPathExtension().lastPathComponent
+                try fm.moveItem(at: dst, to: backups.appending(path: "\(stem) \(stamp).xlsx"))
+            }
+            try fm.copyItem(at: url, to: dst)
+            return dst
+        } catch {
+            return url  // не получилось скопировать — работаем с файлом на месте
+        }
     }
 
     func fillLinks() {

@@ -7,14 +7,16 @@
 «Заполнить автоматически», «Запустить»/«Остановить», «Справка»; прогресс по магазинам и лента результатов.
 Скрипты сообщают о прогрессе строками «@@{json}» (флаг --json), остановка — через стоп-файл.
 """
+import filecmp
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 TOOLS = {"run": "run", "fill_links": "fill_links", "nosimo": "nosimo", "make_links": "make_links_template"}
@@ -495,8 +497,34 @@ class MainWindow(QMainWindow):
 
     # --- выбор файлов и магазинов ---
 
+    def adopt_into_root(self, path):
+        """Таблица из другого места копируется в «Таблицы» основной папки, дальше работаем с копией.
+        Если там уже есть другой файл с тем же именем — спрашиваем: заменить (старый — в резервные копии) или оставить."""
+        if not self.root:
+            return path
+        folder = self.root / "Таблицы"
+        if path.parent.resolve() == folder.resolve():
+            return path
+        dst = folder / path.name
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                if filecmp.cmp(path, dst, shallow=False):
+                    return dst
+                if not self.confirm(f"В «Таблицы» уже есть «{path.name}»",
+                                    "Заменить его выбранным файлом? Прежний сохранится в "
+                                    "«Таблицы/Резервные копии таблиц».", "Заменить"):
+                    return dst
+                backups = folder / "Резервные копии таблиц"
+                backups.mkdir(exist_ok=True)
+                shutil.move(str(dst), str(backups / f"{path.stem} {datetime.now():%Y-%m-%d %H-%M-%S}{path.suffix}"))
+            shutil.copy2(path, dst)
+            return dst
+        except OSError:  # не получилось скопировать — работаем с файлом на месте
+            return path
+
     def set_source(self, path):
-        self.source = Path(path)
+        self.source = self.adopt_into_root(Path(path))
         self.settings.setValue("sourceFile", str(self.source))
         self.table_type = None
         self.refresh()
@@ -544,7 +572,8 @@ class MainWindow(QMainWindow):
         self.save_stores()
 
     def choose_source(self):
-        start = str(self.source.parent) if self.source else str(Path.home())
+        tables = self.root / "Таблицы" if self.root else None
+        start = str(tables if tables and tables.exists() else self.source.parent if self.source else Path.home())
         f, _ = QFileDialog.getOpenFileName(self, "Таблица мониторинга", start, "Excel (*.xlsx)")
         if f:
             self.set_source(f)
@@ -557,6 +586,8 @@ class MainWindow(QMainWindow):
         if d:
             self.root = Path(d)
             self.settings.setValue("rootDirectory", d)
+            if self.source:  # выбранная таблица переезжает в «Таблицы»
+                return self.set_source(self.source)
         self.refresh()
 
     def dragEnterEvent(self, e):

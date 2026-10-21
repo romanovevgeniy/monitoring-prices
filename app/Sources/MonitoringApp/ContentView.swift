@@ -209,7 +209,8 @@ private struct SetupCard: View {
         let panel = NSOpenPanel()
         panel.title = "Таблица мониторинга"
         panel.allowedContentTypes = [UTType(filenameExtension: "xlsx") ?? .spreadsheet]
-        panel.directoryURL = model.sourceFile?.deletingLastPathComponent()
+        panel.directoryURL = model.tablesDirectory.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            ?? model.sourceFile?.deletingLastPathComponent()
         if panel.runModal() == .OK, let url = panel.url { model.setSource(url) }
     }
 }
