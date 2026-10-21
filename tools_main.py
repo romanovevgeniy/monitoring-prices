@@ -9,6 +9,11 @@ import sys
 TOOLS = {"run": "run", "fill_links": "fill_links", "nosimo": "nosimo", "make_links": "make_links_template"}
 
 if __name__ == "__main__":
+    # Вывод всегда в UTF-8 (приложения читают его так): в консоли Windows по умолчанию cp1252/cp866,
+    # и кириллица в print/--help роняет программу с UnicodeEncodeError
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) < 2 or sys.argv[1] not in TOOLS:
         sys.exit(f"Использование: monitoring-tools {{{'|'.join(TOOLS)}}} [аргументы]")
     module = TOOLS[sys.argv[1]]
