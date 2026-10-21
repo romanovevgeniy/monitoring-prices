@@ -728,8 +728,8 @@ class MainWindow(QMainWindow):
         kind = ev.get("type")
         if kind == "plan":
             self.total = ev.get("total", 0)
-            for i, s in enumerate(ev.get("stores", [])):
-                self.stores[s["name"]] = StoreRow(self.stores_grid, i, s["name"], s["total"])
+            for s in ev.get("stores", []):  # второй план (после обновления ссылок) — строки ниже прежних
+                self.stores[s["name"]] = StoreRow(self.stores_grid, len(self.stores), s["name"], s["total"])
         elif kind == "item":
             self.done, self.total = ev.get("done", self.done), ev.get("total", self.total)
             self.eta = ev.get("eta") if self.done < self.total else None

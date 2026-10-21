@@ -210,7 +210,8 @@ final class MonitorRunner {
         case "plan":
             total = event["total"] as? Int ?? 0
             let list = event["stores"] as? [[String: Any]] ?? []
-            stores = list.compactMap { item in
+            // второй план (после обновления ссылок М.Видео) — добавляем строки ниже прежних
+            stores += list.compactMap { item in
                 guard let name = item["name"] as? String, let count = item["total"] as? Int else { return nil }
                 return StoreProgress(name: name, total: count)
             }

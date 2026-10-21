@@ -222,8 +222,10 @@ async def run_store(store, items, page, http, results, log, progress):
 
 
 async def main(args):
-    links = load_links(links_path(args))
     tables = selected_tables(args)
+    if not await refresh_mvideo_links(args, tables):
+        return
+    links = load_links(links_path(args))
     jobs = build_jobs(args, links, tables)
     if not jobs:
         print("Нечего обрабатывать: проверьте фильтры и ссылки в", links_path(args))
@@ -300,6 +302,41 @@ async def main(args):
          stores={STORES[k]: dict(v) for k, v in progress.by_store.items()})
 
 
+MVIDEO_REFRESH_LABEL = "М.Видео: обновление ссылок"
+
+
+async def refresh_mvideo_links(args, tables):
+    """Смартфоны: перед сбором цен заново выбираем ссылки М.Видео — у продавцов маркетплейса самое дешёвое
+    предложение меняется каждый день (распродано, другой продавец). False — пользователь остановил прогон."""
+    phone_tables = [t for t in tables if t.get("autofill") == "phones" and "mvideo" in t["price_cols"]]
+    if (args.no_links_refresh or args.articles or args.limit or not phone_tables
+            or (args.stores and "mvideo" not in args.stores)):
+        return True
+    import fill_links  # здесь, а не наверху: fill_links сам импортирует run
+
+    def forward(kind, **data):  # прогресс автозаполнения — отдельной строкой; его итоги («saved» и др.) не нужны
+        if kind == "plan":
+            emit(kind, total=data["total"], stores=[{"name": MVIDEO_REFRESH_LABEL, "total": data["total"]}])
+        elif kind == "item":
+            emit(kind, **dict(data, store=MVIDEO_REFRESH_LABEL))
+
+    watcher = StopWatcher(args.stop_file)
+    fill_links.run.emit, fill_links.run.StopWatcher = forward, lambda _stop_file: watcher
+    for t in phone_tables:
+        print(f"Обновляю ссылки М.Видео: {Path(t['file']).name}")
+        try:
+            await fill_links.fill(argparse.Namespace(
+                file=t["file"], links=str(links_path(args)), stores="mvideo",
+                only_empty=False, only_missing=False, json=False, stop_file=args.stop_file))
+        except Exception as e:  # не получилось — собираем цены по прежним ссылкам
+            print(f"Ссылки М.Видео не обновлены ({type(e).__name__}: {e}) — цены по прежним ссылкам")
+        if watcher.requested:
+            print("Остановлено пользователем во время обновления ссылок")
+            emit("stopped", done=0, total=0)
+            return False
+    return True
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Мониторинг цен")
     p.add_argument("--tables", type=lambda s: s.split(","), help="ТВ,Смартфоны")
@@ -310,6 +347,8 @@ def parse_args():
     p.add_argument("--stores", type=lambda s: s.split(","), help=",".join(STORES))
     p.add_argument("--articles", type=lambda s: [a.strip() for a in s.split(",")])
     p.add_argument("--limit", type=int, help="не больше N артикулов из каждой таблицы")
+    p.add_argument("--no-links-refresh", action="store_true",
+                   help="смартфоны: не обновлять ссылки М.Видео перед сбором цен")
     p.add_argument("--json", action="store_true", help="события прогресса для приложения")
     p.add_argument("--stop-file", help="если файл появится — остановиться и сохранить собранное")
     a = p.parse_args()
