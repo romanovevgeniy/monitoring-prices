@@ -146,9 +146,14 @@ async def mvideo(page, url, article=None, model=None, **_):
     if status != 200:
         raise StoreError(f"М.Видео API HTTP {status}")
     body = json.loads(text).get("body") or {}
-    name = (body.get("productDetails") or {}).get("name", "")
+    details = body.get("productDetails") or {}
+    name = details.get("name", "")
     if name and not same_product(name, article, model):
         raise StoreError(f"ссылка ведёт на другой товар: «{name}» — проверьте links.xlsx")
+    # Смартфоны: зарубежная версия или распроданное предложение продавца маркетплейса — ссылка устарела
+    if model and details.get("supplierId") and (details.get("isForeign") or details.get("soldOut")):
+        why = "зарубежная версия" if details.get("isForeign") else "предложение продавца распродано"
+        raise StoreError(f"{why} у продавца маркетплейса — обновите ссылки автозаполнением")
     price = ((body.get("productPrices") or {}).get("price") or {}).get("salePrice")
     return Result(int(price), url) if price else Result(None, url, "нет цены / нет в наличии")
 

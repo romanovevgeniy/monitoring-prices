@@ -27,7 +27,7 @@ from excel import detect_table
 from make_links_template import link_stores, table_articles, main as sync_links
 from matching import name_matches
 from phone_sites import DNS as PhoneDNS, MTS as PhoneMTS, MVideo as PhoneMVideo, SamsungStore as PhoneSamsungStore
-from stores import make_http_client, wait_antibot
+from stores import MVIDEO_ID, make_http_client, wait_antibot
 
 from paths import DATA_DIR as ROOT  # noqa: E402
 SUPPORTED = ("mvideo", "dns")
@@ -136,6 +136,8 @@ async def fill(args):
     if unsupported:
         print(f"Автозаполнение пока не умеет: {', '.join(unsupported)} — эти ссылки вставляются вручную")
         run.emit("unsupported", stores=unsupported)
+    if args.stores:
+        stores = [s for s in stores if s in args.stores.split(",")]
     if not stores:
         run.emit("nothing", links=str(links_path))
         return
@@ -218,6 +220,12 @@ async def fill(args):
                     found = await dns_find(page, article)
                     await asyncio.sleep(random.uniform(1.5, 3.5))
                 current = str(ws.cell(row, col_of[store]).value or "").strip()
+                if found.url == DASH and current.startswith("http") and site and store == "mvideo":
+                    # прежняя ссылка на зарубежную версию или распроданное предложение продавца — не годится
+                    m = MVIDEO_ID.search(current)
+                    d = await site.details(m.group(1)) if m else {}
+                    if d.get("supplierId") and (d.get("isForeign") or d.get("soldOut")):
+                        current = ""
                 if found.url == DASH and current.startswith("http"):
                     # Не нашли (М.Видео не показывает часть карточек в каталоге) — рабочую ссылку не затираем
                     report(store, article, "ok", current, f"{found.note} — оставлена прежняя ссылка")
@@ -256,6 +264,7 @@ def parse_args():
     p.add_argument("--links", help=f"файл ссылок (по умолчанию {LINKS_FILE} в папке проекта)")
     p.add_argument("--only-empty", action="store_true", help="заполнять только пустые ячейки")
     p.add_argument("--only-missing", action="store_true", help="заполнять пустые ячейки и ячейки с «-»")
+    p.add_argument("--stores", help="только эти магазины, через запятую (mvideo,dns,mts,samsungstore)")
     p.add_argument("--json", action="store_true", help="события прогресса для приложения")
     p.add_argument("--stop-file", help="если файл появится — остановиться и сохранить собранное")
     return p.parse_args()

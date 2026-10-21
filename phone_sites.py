@@ -3,7 +3,7 @@
 Строка таблицы сопоставляется по смыслу (phone_matching.py): модель, память, связь, размер часов.
 Среди подходящих карточек (обычно — разные цвета) берётся самая дешёвая в наличии; в наличии нет — самая дешёвая.
 
-М.Видео — каталог категорий, только карточки самого М.Видео (без стороннего продавца маркетплейса).
+М.Видео — каталог категорий: карточка самого М.Видео, если её нет — самый дешёвый продавец маркетплейса (без зарубежных).
 DNS — поиск по модели, цена и наличие — из плиток выдачи.
 МТС, samsungstore — обход каталога, название/цена/наличие — со страницы товара (кэшируется).
 """
@@ -48,17 +48,20 @@ def query_for(row_name):
 class MVideo:
     def __init__(self, page, catalog_loader):
         self.page, self.catalog_loader = page, catalog_loader
-        self.items, self.own_cache = None, {}
+        self.items, self.details_cache = None, {}
+
+    async def details(self, product_id):
+        """productDetails карточки (кэш): supplierId — сторонний продавец, isForeign — зарубежная версия, soldOut."""
+        if product_id not in self.details_cache:
+            d = await self.page.evaluate("async u => await (await fetch(u, {credentials: 'include'})).json()",
+                                         f"/bff/pdp/info?productId={product_id}")
+            self.details_cache[product_id] = ((d or {}).get("body") or {}).get("productDetails") or {}
+            await asyncio.sleep(0.2)
+        return self.details_cache[product_id]
 
     async def is_own(self, product_id):
         """Карточка самого М.Видео — у неё нет стороннего поставщика (supplierId)."""
-        if product_id not in self.own_cache:
-            d = await self.page.evaluate("async u => await (await fetch(u, {credentials: 'include'})).json()",
-                                         f"/bff/pdp/info?productId={product_id}")
-            details = ((d or {}).get("body") or {}).get("productDetails") or {}
-            self.own_cache[product_id] = not details.get("supplierId")
-            await asyncio.sleep(0.2)
-        return self.own_cache[product_id]
+        return not (await self.details(product_id)).get("supplierId")
 
     async def find(self, row_name):
         if self.items is None:
@@ -73,13 +76,14 @@ class MVideo:
             if await self.is_own(x["productId"]):
                 note = "" if x in in_stock else " (сейчас нет в наличии)"
                 return f"https://www.mvideo.ru/products/{x['productId']}", f"{len(cands)} карточек, выбрана М.Видео{note}"
-        # 2) своей нет — самый дешёвый продавец маркетплейса, без зарубежных версий (Global, EU, HK …)
-        for x in ordered:
-            if not FOREIGN.search(x.get("name", "")):
-                note = "" if x in in_stock else ", сейчас нет в наличии"
+        # 2) своей нет — самый дешёвый продавец маркетплейса в наличии, без зарубежных версий: признак isForeign
+        #    в карточке (в названии «Global» бывает не написан) и слова Global, EU, HK … в названии
+        for x in in_stock:
+            d = await self.details(x["productId"])
+            if not d.get("isForeign") and not d.get("soldOut") and not FOREIGN.search(x.get("name", "")):
                 return (f"https://www.mvideo.ru/products/{x['productId']}",
-                        f"{len(cands)} карточек, своей у М.Видео нет — продавец маркетплейса{note}")
-        return None, "только зарубежные версии" if cands else "нет в каталоге М.Видео"
+                        f"{len(cands)} карточек, своей у М.Видео нет — продавец маркетплейса")
+        return None, "только зарубежные версии / нет в наличии" if cands else "нет в каталоге М.Видео"
 
 
 # ---------- DNS ----------
