@@ -48,8 +48,19 @@ begin
             RegKeyExists(HKCU, 'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe');
 end;
 
+// Антивирус (бывает с Kaspersky) не даёт записать библиотеки Qt — без них программа падает при запуске
+function QtInstalled(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\_internal\PySide6\QtCore.pyd')) and
+            FileExists(ExpandConstant('{app}\_internal\shiboken6\Shiboken.pyd'));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if (CurStep = ssPostInstall) and not QtInstalled() then
+    MsgBox('Не все файлы программы записались: нет библиотек Qt в папке ' + ExpandConstant('{app}\_internal') + '. '
+           + 'Обычно их блокирует антивирус. Добавьте эту папку в исключения антивируса (или приостановите защиту '
+           + 'на время установки) и запустите установку ещё раз.', mbError, MB_OK);
   if (CurStep = ssPostInstall) and not ChromeInstalled() then
     MsgBox('Для работы программы нужен Google Chrome — установите его с https://www.google.com/chrome/ '
            + 'перед первым запуском мониторинга.', mbInformation, MB_OK);
