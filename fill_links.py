@@ -21,6 +21,7 @@ from urllib.parse import quote
 import openpyxl
 from playwright.async_api import async_playwright
 
+import layout
 import run
 from config import LINKS_FILE, STORES
 from excel import detect_table
@@ -121,10 +122,15 @@ async def dns_find(page, article):
 # ---------- основной цикл ----------
 
 async def fill(args):
-    table = detect_table(Path(args.file).expanduser())
+    table = detect_table(Path(args.file).expanduser().resolve())
     if not table:
         sys.exit(f"Не удалось определить тип таблицы по заголовкам: {args.file}")
-    links_path = Path(args.links).expanduser() if args.links else ROOT / LINKS_FILE
+    if args.links:
+        links_path = Path(args.links).expanduser()
+    elif getattr(args, "root", None):  # основная папка: «Ссылки/links_tv.xlsx» или «links_smart.xlsx»
+        links_path = layout.links_file(args.root, table["name"], getattr(args, "legacy_links", None))
+    else:
+        links_path = ROOT / LINKS_FILE
     sync_links([table], links_path)  # строки для новых артикулов
 
     phones = table.get("autofill") == "phones"
@@ -261,6 +267,8 @@ async def fill(args):
 def parse_args():
     p = argparse.ArgumentParser(description="Автозаполнение файла ссылок (ТВ: М.Видео, DNS; смартфоны: + МТС, samsungstore)")
     p.add_argument("--file", required=True, help="таблица мониторинга (тип — по заголовкам)")
+    p.add_argument("--root", help="основная папка: файл ссылок — «Ссылки/links_tv.xlsx» или «links_smart.xlsx»")
+    p.add_argument("--legacy-links", help="с --root: прежний файл ссылок — переносится в «Ссылки», если там ещё пусто")
     p.add_argument("--links", help=f"файл ссылок (по умолчанию {LINKS_FILE} в папке проекта)")
     p.add_argument("--only-empty", action="store_true", help="заполнять только пустые ячейки")
     p.add_argument("--only-missing", action="store_true", help="заполнять пустые ячейки и ячейки с «-»")

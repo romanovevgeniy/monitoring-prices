@@ -25,7 +25,7 @@ Write-Host "== Программа (PyInstaller)"
     --collect-all playwright `
     --hidden-import run --hidden-import fill_links --hidden-import nosimo `
     --hidden-import make_links_template --hidden-import screenshot --hidden-import excel_html `
-    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites `
+    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout `
     desktop_app.py
 
 Write-Host "== Скрипты (консольный monitoring-tools.exe)"
@@ -34,7 +34,7 @@ Write-Host "== Скрипты (консольный monitoring-tools.exe)"
     --collect-all playwright --exclude-module PySide6 --exclude-module tkinter `
     --hidden-import run --hidden-import fill_links --hidden-import nosimo `
     --hidden-import make_links_template --hidden-import screenshot --hidden-import excel_html `
-    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites `
+    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout `
     tools_main.py
 if (Test-Path dist\MonitoringPrices\tools) { Remove-Item -Recurse -Force dist\MonitoringPrices\tools }
 Copy-Item -Recurse dist\tools-build\monitoring-tools dist\MonitoringPrices\tools

@@ -85,8 +85,9 @@ final class MonitorRunner {
 
     var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
 
-    /// file — таблица мониторинга, target — папка, внутри которой run.py создаёт «Мониторинг <дата>».
-    func start(file: URL, target: URL, links: URL, extraArguments: [String] = []) {
+    /// file — таблица мониторинга, root — основная папка (ссылки в «Ссылки», результаты в папке дня).
+    func start(file: URL, root: URL, links: URL? = nil, legacyLinks: URL? = nil, extraArguments: [String] = []) {
+        let rootArguments = Self.rootArguments(root, legacyLinks)
         guard !isBusy, let dir = project.directory else { return }
         reset()
         mode = .prices
@@ -94,7 +95,7 @@ final class MonitorRunner {
         phase = .syncingLinks
         startedAt = .now
         Task {
-            let syncStatus = await execute(["make_links_template.py", "--file", file.path, "--links", links.path], in: dir) { line in
+            let syncStatus = await execute(["make_links_template.py", "--file", file.path] + rootArguments, in: dir) { line in
                 self.syncMessages.append(line)
             }
             if phase == .stopping {  // остановили во время синхронизации файла ссылок
@@ -107,8 +108,7 @@ final class MonitorRunner {
                 return finish()
             }
             phase = .running
-            let arguments = ["run.py", "--json", "--file", file.path, "--out", target.path, "--links", links.path]
-                + extraArguments
+            let arguments = ["run.py", "--json", "--file", file.path] + rootArguments + extraArguments
             let status = await execute(arguments, in: dir) { line in
                 self.handle(line)
             }
@@ -127,9 +127,14 @@ final class MonitorRunner {
     }
 
     /// Подбор ссылок по таблице (fill_links.py). Перед записью скрипт делает резервную копию.
-    func fillLinks(file: URL, links: URL) {
+    func fillLinks(file: URL, root: URL, links: URL? = nil, legacyLinks: URL? = nil) {
         linksFile = links
-        runTool(.links, ["fill_links.py", "--json", "--file", file.path, "--links", links.path])
+        runTool(.links, ["fill_links.py", "--json", "--file", file.path] + Self.rootArguments(root, legacyLinks))
+    }
+
+    /// --root и прежний файл ссылок (до основной папки он выбирался вручную) — его переносят в «Ссылки» один раз.
+    private static func rootArguments(_ root: URL, _ legacyLinks: URL?) -> [String] {
+        ["--root", root.path] + (legacyLinks.map { ["--legacy-links", $0.path] } ?? [])
     }
 
     /// Цены НОСИМО с galaxystore.ru в колонку НОСИМО выбранной таблицы (nosimo.py, с резервной копией).

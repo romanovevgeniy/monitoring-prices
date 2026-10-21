@@ -23,6 +23,7 @@ from playwright.async_api import async_playwright
 
 from config import GALAXYSTORE_URL, LINKS_FILE, STORES, TABLES
 from excel import as_number, detect_table, write_table
+import layout
 from make_links_template import link_stores
 from screenshot import screenshot
 from stores import STORE_IMPL, Result, StoreError, make_http_client
@@ -64,8 +65,19 @@ def emit(kind, **data):
         print("@@" + json.dumps({"type": kind, **data}, ensure_ascii=False), flush=True)
 
 
-def links_path(args):
-    return Path(args.links).expanduser() if args.links else ROOT / LINKS_FILE
+def links_path(args, table_name):
+    """Файл ссылок таблицы: --links; с основной папкой (--root) — «Ссылки/links_tv.xlsx» / «links_smart.xlsx»;
+    иначе links.xlsx в папке проекта."""
+    if args.links:
+        return Path(args.links).expanduser()
+    return layout.links_file(args.root, table_name, args.legacy_links) if args.root else ROOT / LINKS_FILE
+
+
+def load_all_links(args, tables):
+    links = {}
+    for t in tables:
+        links.update(load_links(links_path(args, t["name"])))
+    return links
 
 
 def load_links(path):
@@ -94,7 +106,7 @@ def load_links(path):
 def selected_tables(args):
     """Таблицы прогона: выбранный файл (тип определяется по заголовкам) или таблицы из config."""
     if args.file:
-        t = detect_table(Path(args.file).expanduser())
+        t = detect_table(Path(args.file).expanduser().resolve())
         if not t:
             sys.exit(f"Не удалось определить тип таблицы по заголовкам: {args.file}")
         return [t]
@@ -104,7 +116,9 @@ def selected_tables(args):
 
 
 def output_dir(args):
-    """--out: <папка>/Мониторинг <дата>/; без него — results/ в проекте."""
+    """--root: папка дня в основной папке; --out: <папка>/Мониторинг <дата>/; без них — results/ в проекте."""
+    if args.root:
+        return layout.day_dir(args.root)
     return Path(args.out).expanduser() / f"Мониторинг {date.today().isoformat()}" if args.out else RESULTS_DIR
 
 
@@ -141,7 +155,7 @@ def build_jobs(args, links, tables):
                 ref = as_number(ws[f"{col}{row}"].value) or base_old
                 jobs.setdefault(store, []).append((t["name"], row, article, url, ref, model))
     if missing:
-        print(f"Нет ссылки в {links_path(args).name} ({len(missing)}) — эти ячейки не обновятся:")
+        print(f"Нет ссылки в файле ссылок ({len(missing)}) — эти ячейки не обновятся:")
         print("  " + "\n  ".join(missing))
         print("  Новые артикулы добавляются в файл ссылок командой: .venv/bin/python make_links_template.py")
         emit("missing_links", items=missing)
@@ -225,11 +239,12 @@ async def main(args):
     tables = selected_tables(args)
     if not await refresh_mvideo_links(args, tables):
         return
-    links = load_links(links_path(args))
+    links = load_all_links(args, tables)
     jobs = build_jobs(args, links, tables)
     if not jobs:
-        print("Нечего обрабатывать: проверьте фильтры и ссылки в", links_path(args))
-        emit("nothing", links=str(links_path(args)))
+        files = ", ".join(str(links_path(args, t["name"])) for t in tables)
+        print("Нечего обрабатывать: проверьте фильтры и ссылки в", files)
+        emit("nothing", links=files)
         return
     for store, items in jobs.items():
         print(f"{STORES[store]}: {len(items)} позиций")
@@ -277,20 +292,28 @@ async def main(args):
         if t["name"] not in results:
             continue
         src = Path(t["file"])
-        # В папке с датой — имя исходника; в results/ — с датой в имени
-        dst = out / (src.name if args.out else f"{src.stem}_{stamp}{src.suffix}")
+        # Основная папка: <день>/ТВ/<исходник>; --out: <папка с датой>/<исходник>; results/ — с датой в имени
+        if args.root:
+            dst = layout.table_dir(args.root, t["name"]) / src.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            dst = out / (src.name if args.out else f"{src.stem}_{stamp}{src.suffix}")
         # Повторный запуск в тот же день дописывает в уже собранный файл (например, перепроверка отдельных магазинов)
         changed = write_table(t, dst if dst.exists() else src, dst, results[t["name"]], base_src_path=src)
         print(f"Сохранено: {dst}  (изменено ячеек: {changed})")
         emit("saved", table=t["name"], path=str(dst), changed=changed)
-        png = out / "Скриншоты" / f"{dst.stem}.png"
+        png = layout.screenshot_path(args.root, t["name"]) if args.root else out / "Скриншоты" / f"{dst.stem}.png"
+        if args.root:
+            layout.snapshot_links(args.root, t["name"])
         try:
             await screenshot(dst, png)
             print(f"Скриншот: {png}")
             emit("screenshot", table=t["name"], path=str(png))
         except Exception as e:  # скриншот — дополнение, без него результат всё равно сохранён
             print(f"Скриншот не получился: {e}")
-    log_path = out / f"Лог {datetime.now():%Y-%m-%d %H-%M-%S}.csv"
+    log_dir = layout.logs_dir(args.root) if args.root else out
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"Лог {datetime.now():%Y-%m-%d %H-%M-%S}.csv"
     with open(log_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(["время", "таблица", "артикул", "магазин", "статус", "цена", "ссылка", "примечание"])
@@ -326,7 +349,7 @@ async def refresh_mvideo_links(args, tables):
         print(f"Обновляю ссылки М.Видео: {Path(t['file']).name}")
         try:
             await fill_links.fill(argparse.Namespace(
-                file=t["file"], links=str(links_path(args)), stores="mvideo",
+                file=t["file"], links=str(links_path(args, t["name"])), stores="mvideo",
                 only_empty=False, only_missing=False, json=False, stop_file=args.stop_file))
         except Exception as e:  # не получилось — собираем цены по прежним ссылкам
             print(f"Ссылки М.Видео не обновлены ({type(e).__name__}: {e}) — цены по прежним ссылкам")
@@ -342,7 +365,9 @@ def parse_args():
     p.add_argument("--tables", type=lambda s: s.split(","), help="ТВ,Смартфоны")
     p.add_argument("--file", help="таблица мониторинга (любой путь); тип определяется по заголовкам")
     p.add_argument("--out", help="папка для результатов; внутри создаётся «Мониторинг <дата>»")
-    p.add_argument("--links", help=f"файл ссылок (по умолчанию {LINKS_FILE} в папке проекта)")
+    p.add_argument("--root", help="основная папка: ссылки в «Ссылки», результаты в папке дня (ТВ, Смартфоны, Скриншоты, Логи)")
+    p.add_argument("--legacy-links", help="с --root: прежний файл ссылок — переносится в «Ссылки», если там ещё пусто")
+    p.add_argument("--links", help=f"файл ссылок (по умолчанию: с --root — «Ссылки/links_tv|links_smart.xlsx», иначе {LINKS_FILE} в папке проекта)")
     p.add_argument("--detect", metavar="FILE", help="только определить тип таблицы и выйти")
     p.add_argument("--stores", type=lambda s: s.split(","), help=",".join(STORES))
     p.add_argument("--articles", type=lambda s: [a.strip() for a in s.split(",")])

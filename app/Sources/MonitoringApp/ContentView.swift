@@ -18,6 +18,12 @@ struct ContentView: View {
         }
         .padding(20)
         .animation(.smooth, value: runner.phase)
+        // Первый запуск: сразу спрашиваем, где создать основную папку
+        .task {
+            guard model.rootDirectory == nil else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            model.chooseRoot()
+        }
         // Таблицу можно просто перетащить в окно
         .dropDestination(for: URL.self) { urls, _ in
             guard !runner.isBusy, let xlsx = urls.first(where: { $0.pathExtension.lowercased() == "xlsx" }) else {
@@ -115,28 +121,18 @@ private struct SetupCard: View {
                 }
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow {
-                    Text("Сохранять в").foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        PathLabel(url: model.targetDirectory, symbol: "folder.fill", color: .blue)
-                        Text("будет создана папка «\(model.todayFolderName)», скриншоты — в «Скриншоты»")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Button("Изменить…", action: chooseTarget)
+                    Text("Основная папка").foregroundStyle(.secondary)
+                    rootLabel
+                    Button(model.rootDirectory == nil ? "Выбрать…" : "Изменить…") { model.chooseRoot() }
                 }
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow {
                     Text("Ссылки").foregroundStyle(.secondary)
                     linksLabel
-                    Menu("Выбрать…") {
-                        Button("Открыть существующий файл…", action: chooseLinks)
-                        Button("Создать новый файл…", action: createLinks)
-                        if model.linksFile != nil {
-                            Divider()
-                            Button("Вернуть links.xlsx по умолчанию") { model.setLinks(nil) }
-                        }
+                    Button("Открыть") {
+                        if let links = model.linksFile { NSWorkspace.shared.open(links) }
                     }
-                    .fixedSize()
+                    .disabled(!(model.linksFile.map { FileManager.default.fileExists(atPath: $0.path) } ?? false))
                 }
             }
             .disabled(disabled)
@@ -171,13 +167,29 @@ private struct SetupCard: View {
     }
 
     @ViewBuilder
+    private var rootLabel: some View {
+        if let root = model.rootDirectory {
+            VStack(alignment: .leading, spacing: 2) {
+                PathLabel(url: root, symbol: "folder.fill", color: .blue)
+                Text("сегодня — папка «\(model.todayFolderName)»: ТВ, Смартфоны, Ссылки, Скриншоты, Логи")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("Выберите папку, где будут храниться таблицы, ссылки и скриншоты")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
     private var linksLabel: some View {
-        if let links = model.effectiveLinksFile {
+        if let links = model.linksFile {
             VStack(alignment: .leading, spacing: 2) {
                 PathLabel(url: links, symbol: "link", color: .purple)
                 Text(FileManager.default.fileExists(atPath: links.path)
                      ? "ссылки М.Видео, DNS, МТС, samsungstore; новые артикулы добавляются автоматически"
-                     : "файла пока нет — будет создан и заполнен")
+                     : "файла пока нет — будет создан при запуске (прежний файл ссылок переносится)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button {
@@ -193,39 +205,12 @@ private struct SetupCard: View {
         }
     }
 
-    private func chooseLinks() {
-        let panel = NSOpenPanel()
-        panel.title = "Файл ссылок"
-        panel.allowedContentTypes = [UTType(filenameExtension: "xlsx") ?? .spreadsheet]
-        panel.directoryURL = model.effectiveLinksFile?.deletingLastPathComponent()
-        if panel.runModal() == .OK, let url = panel.url { model.setLinks(url) }
-    }
-
-    private func createLinks() {
-        let panel = NSSavePanel()
-        panel.title = "Новый файл ссылок"
-        panel.nameFieldStringValue = "links.xlsx"
-        panel.allowedContentTypes = [UTType(filenameExtension: "xlsx") ?? .spreadsheet]
-        panel.directoryURL = model.targetDirectory
-        if panel.runModal() == .OK, let url = panel.url { model.setLinks(url) }
-    }
-
     private func chooseSource() {
         let panel = NSOpenPanel()
         panel.title = "Таблица мониторинга"
         panel.allowedContentTypes = [UTType(filenameExtension: "xlsx") ?? .spreadsheet]
         panel.directoryURL = model.sourceFile?.deletingLastPathComponent()
         if panel.runModal() == .OK, let url = panel.url { model.setSource(url) }
-    }
-
-    private func chooseTarget() {
-        let panel = NSOpenPanel()
-        panel.title = "Папка для результатов"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.directoryURL = model.targetDirectory
-        if panel.runModal() == .OK, let url = panel.url { model.setTarget(url) }
     }
 }
 

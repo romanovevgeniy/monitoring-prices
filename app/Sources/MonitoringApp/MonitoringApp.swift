@@ -51,44 +51,49 @@ final class AppModel {
     /// Магазины выбранной таблицы и отмеченные галочками (запоминаются отдельно для ТВ и смартфонов).
     private(set) var availableStores: [StoreOption] = []
     private(set) var selectedStores: Set<String> = []
-    /// Куда складывать результаты: внутри создаётся «Мониторинг <дата>».
-    private(set) var targetDirectory: URL
-    /// Файл ссылок М.Видео/DNS/МТС/samsungstore. Если его нет — создастся при запуске.
-    private(set) var linksFile: URL?
-    var defaultLinksFile: URL? { project.directory?.appending(path: "links.xlsx") }
-    var effectiveLinksFile: URL? { linksFile ?? defaultLinksFile }
+    /// Основная папка: «Ссылки» (links_tv.xlsx, links_smart.xlsx) и папки дней «2026-10-22» с подпапками
+    /// ТВ, Смартфоны, Ссылки (копия), Скриншоты, Логи. Спрашивается при первом запуске.
+    private(set) var rootDirectory: URL?
 
-    var canStart: Bool { sourceFile != nil && detectedTable != nil && !(runner?.isBusy ?? true) }
+    /// Файл ссылок выбранной таблицы — в «Ссылки» основной папки (создаётся или переносится при первом запуске).
+    var linksFile: URL? {
+        guard let rootDirectory, let table = detectedTable else { return nil }
+        return rootDirectory.appending(path: "Ссылки/\(table == "ТВ" ? "links_tv" : "links_smart").xlsx")
+    }
+
+    /// Файл ссылок, выбранный вручную до появления основной папки, — переносится в «Ссылки» при первом запуске.
+    private var legacyLinksFile: URL? { UserDefaults.standard.url(forKey: "linksFile") }
+
+    var canStart: Bool {
+        sourceFile != nil && detectedTable != nil && rootDirectory != nil && !(runner?.isBusy ?? true)
+    }
     /// «Запустить» — нужен хотя бы один отмеченный магазин.
     var canStartPrices: Bool { canStart && !selectedStores.isEmpty }
     var allStoresSelected: Bool { !availableStores.isEmpty && selectedStores.count == availableStores.count }
 
     init() {
         let defaults = UserDefaults.standard
-        targetDirectory = defaults.url(forKey: "targetDirectory")
-            ?? URL.documentsDirectory.appending(path: "Мониторинг цен")
-        linksFile = defaults.url(forKey: "linksFile")
+        rootDirectory = defaults.url(forKey: "rootDirectory")
         if project.directory != nil { runner = MonitorRunner(project: project) }
         if let saved = defaults.url(forKey: "sourceFile"), FileManager.default.fileExists(atPath: saved.path) {
             setSource(saved)
         }
-        // Служебный запуск для проверки: open "Мониторинг цен.app" --args --autostart <xlsx> <папка> [аргументы run.py]
+        // Служебный запуск для проверки: open "Мониторинг цен.app" --args --autostart <xlsx> <основная папка> [аргументы run.py]
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "--autostart"), i + 2 < args.count {
-            let file = URL(filePath: args[i + 1]), target = URL(filePath: args[i + 2])
+            let file = URL(filePath: args[i + 1]), root = URL(filePath: args[i + 2])
             let extra = Array(args[(i + 3)...])
             Task {
                 try? await Task.sleep(for: .seconds(3))
-                guard let links = effectiveLinksFile else { return }
-                runner?.start(file: file, target: target, links: links, extraArguments: extra)
+                runner?.start(file: file, root: root, extraArguments: extra)
             }
         }
-        // Служебная проверка автозаполнения: --autofill <xlsx> <файл ссылок>
+        // Служебная проверка автозаполнения: --autofill <xlsx> <основная папка>
         if let i = args.firstIndex(of: "--autofill"), i + 2 < args.count {
-            let file = URL(filePath: args[i + 1]), links = URL(filePath: args[i + 2])
+            let file = URL(filePath: args[i + 1]), root = URL(filePath: args[i + 2])
             Task {
                 try? await Task.sleep(for: .seconds(3))
-                runner?.fillLinks(file: file, links: links)
+                runner?.fillLinks(file: file, root: root)
             }
         }
     }
@@ -137,19 +142,24 @@ final class AppModel {
         UserDefaults.standard.set(availableStores.map(\.key).filter(selectedStores.contains), forKey: "stores.\(table)")
     }
 
-    /// nil — вернуться к links.xlsx в папке проекта.
-    func setLinks(_ url: URL?) {
-        linksFile = url
-        UserDefaults.standard.set(url, forKey: "linksFile")
-    }
-
-    func setTarget(_ url: URL) {
-        targetDirectory = url
-        UserDefaults.standard.set(url, forKey: "targetDirectory")
+    /// Выбор основной папки (при первом запуске — сразу). Можно создать новую прямо в окне выбора.
+    func chooseRoot() {
+        let panel = NSOpenPanel()
+        panel.title = "Основная папка мониторинга"
+        panel.message = "Где хранить мониторинг: здесь появятся папка «Ссылки» и папки по датам "
+            + "(ТВ, Смартфоны, Ссылки, Скриншоты, Логи). Можно создать новую папку."
+        panel.prompt = "Выбрать"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = rootDirectory ?? URL.documentsDirectory
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        rootDirectory = url
+        UserDefaults.standard.set(url, forKey: "rootDirectory")
     }
 
     func fillLinks() {
-        guard canStart, let sourceFile, let links = effectiveLinksFile else { return }
+        guard canStart, let sourceFile, let rootDirectory else { return }
         let alert = NSAlert()
         alert.messageText = "Заполнить ссылки автоматически?"
         alert.informativeText = """
@@ -161,7 +171,7 @@ final class AppModel {
         alert.addButton(withTitle: "Заполнить")
         alert.addButton(withTitle: "Отмена")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        runner?.fillLinks(file: sourceFile, links: links)
+        runner?.fillLinks(file: sourceFile, root: rootDirectory, links: linksFile, legacyLinks: legacyLinksFile)
     }
 
     func updateNosimo() {
@@ -180,15 +190,16 @@ final class AppModel {
     }
 
     func start() {
-        guard canStartPrices, let sourceFile, let links = effectiveLinksFile else { return }
+        guard canStartPrices, let sourceFile, let rootDirectory else { return }
         // все магазины — без фильтра; иначе только отмеченные
         let stores = allStoresSelected ? [] : ["--stores", availableStores.map(\.key).filter(selectedStores.contains)
             .joined(separator: ",")]
-        runner?.start(file: sourceFile, target: targetDirectory, links: links, extraArguments: stores)
+        runner?.start(file: sourceFile, root: rootDirectory, links: linksFile, legacyLinks: legacyLinksFile,
+                      extraArguments: stores)
     }
 
-    /// Имя папки, которая будет создана сегодня.
-    var todayFolderName: String { "Мониторинг \(Date.now.formatted(.iso8601.year().month().day()))" }
+    /// Папка дня в основной папке.
+    var todayFolderName: String { Date.now.formatted(.iso8601.year().month().day()) }
 }
 
 /// Определяет тип таблицы и её магазины через `run.py --detect` — единая логика с Python-частью.

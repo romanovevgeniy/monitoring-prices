@@ -89,14 +89,23 @@ def main(tables=TABLES, path=ROOT / LINKS_FILE):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Синхронизация links.xlsx с таблицами мониторинга")
     ap.add_argument("--file", help="взять артикулы из этого файла (тип таблицы — по заголовкам)")
+    ap.add_argument("--root", help="основная папка: файл ссылок — «Ссылки/links_tv.xlsx» или «links_smart.xlsx»")
+    ap.add_argument("--legacy-links", help="с --root: прежний файл ссылок — переносится в «Ссылки», если там ещё пусто")
     ap.add_argument("--links", help=f"файл ссылок (по умолчанию {LINKS_FILE} в папке проекта); если его нет — будет создан")
     a = ap.parse_args()
     links = Path(a.links).expanduser() if a.links else ROOT / LINKS_FILE
     if a.file:
         from excel import detect_table
-        t = detect_table(Path(a.file).expanduser())
+        t = detect_table(Path(a.file).expanduser().resolve())
         if not t:
             sys.exit(f"Не удалось определить тип таблицы по заголовкам: {a.file}")
+        if a.root and not a.links:
+            import layout
+            links = layout.links_file(a.root, t["name"], a.legacy_links)
         main([t], links)
+    elif a.root and not a.links:
+        import layout
+        for t in TABLES:
+            main([t], layout.links_file(a.root, t["name"], a.legacy_links))
     else:
         main(path=links)

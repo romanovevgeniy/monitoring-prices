@@ -34,12 +34,12 @@ if len(sys.argv) > 2 and sys.argv[1] == "--tool":
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt, QTimer, QUrl  # noqa: E402
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QKeySequence, QPalette, QShortcut  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QApplication, QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMenu,
-    QMessageBox, QProgressBar, QPushButton, QSizePolicy, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QApplication, QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+    QMessageBox, QProgressBar, QPushButton, QSizePolicy, QTextEdit, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
-from paths import APP_DIR, DATA_DIR, FROZEN  # noqa: E402
+from paths import APP_DIR, FROZEN  # noqa: E402
 
 if len(sys.argv) > 1 and sys.argv[1] == "--selftest":  # проверка сборки: Qt загружается, окно создаётся
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -243,8 +243,9 @@ class MainWindow(QMainWindow):
 
         self.source = self._path_setting("sourceFile", must_exist=True)
         self.table_type = None
-        self.target = self._path_setting("targetDirectory") or (Path.home() / "Documents" / APP_NAME)
-        self.links = self._path_setting("linksFile")
+        # Основная папка: «Ссылки» (links_tv.xlsx, links_smart.xlsx) и папки дней «2026-10-22»
+        # (ТВ, Смартфоны, Ссылки, Скриншоты, Логи). Спрашивается при первом запуске.
+        self.root = self._path_setting("rootDirectory")
         self.process = None
         self.mode = "prices"
         self.phase = "idle"
@@ -289,7 +290,10 @@ class MainWindow(QMainWindow):
         return p if (not must_exist or p.exists()) else None
 
     def effective_links(self):
-        return self.links or (DATA_DIR / "links.xlsx")
+        """Файл ссылок выбранной таблицы в «Ссылки» основной папки (создаётся или переносится при запуске)."""
+        if not self.root:
+            return None
+        return self.root / "Ссылки" / ("links_tv.xlsx" if self.table_type == "ТВ" else "links_smart.xlsx")
 
     def reset_state(self):
         self.total = self.done = 0
@@ -363,15 +367,15 @@ class MainWindow(QMainWindow):
         self.all_stores_btn.clicked.connect(self.toggle_all_stores)
         g.addWidget(self.all_stores_btn, 1, 2)
 
-        g.addWidget(label("Сохранять в", "muted"), 2, 0)
+        g.addWidget(label("Основная папка", "muted"), 2, 0)
         tgt = QVBoxLayout()
         self.target_name = label()
         self.target_hint = PathLabel()
         tgt.addWidget(self.target_name)
         tgt.addWidget(self.target_hint)
         g.addLayout(tgt, 2, 1)
-        b_tgt = QPushButton("Изменить…")
-        b_tgt.clicked.connect(self.choose_target)
+        self.root_btn = b_tgt = QPushButton("Изменить…")
+        b_tgt.clicked.connect(self.choose_root)
         g.addWidget(b_tgt, 2, 2)
 
         g.addWidget(label("Ссылки", "muted"), 3, 0)
@@ -388,14 +392,8 @@ class MainWindow(QMainWindow):
         self.fill_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         lk.addWidget(self.fill_btn)
         g.addLayout(lk, 3, 1)
-        mb = QToolButton()
-        mb.setText("Выбрать…")
-        mb.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu(mb)
-        menu.addAction("Открыть существующий файл…", self.choose_links)
-        menu.addAction("Создать новый файл…", self.create_links)
-        self.default_links_action = menu.addAction("Вернуть links.xlsx по умолчанию", lambda: self.set_links(None))
-        mb.setMenu(menu)
+        mb = self.open_links_btn = QPushButton("Открыть")
+        mb.clicked.connect(lambda: open_path(self.effective_links()))
         g.addWidget(mb, 3, 2)
         self.setup_widgets = [b_src, b_tgt, mb]
         return c
@@ -551,30 +549,15 @@ class MainWindow(QMainWindow):
         if f:
             self.set_source(f)
 
-    def choose_target(self):
-        d = QFileDialog.getExistingDirectory(self, "Папка для результатов", str(self.target))
+    def choose_root(self):
+        """Основная папка (при первом запуске — сразу). Новую папку можно создать прямо в окне выбора."""
+        d = QFileDialog.getExistingDirectory(
+            self, "Основная папка мониторинга: здесь появятся «Ссылки» и папки по датам",
+            str(self.root or Path.home() / "Documents"))
         if d:
-            self.target = Path(d)
-            self.settings.setValue("targetDirectory", d)
-            self.refresh()
-
-    def set_links(self, path):
-        self.links = Path(path) if path else None
-        if path:
-            self.settings.setValue("linksFile", str(path))
-        else:
-            self.settings.remove("linksFile")
+            self.root = Path(d)
+            self.settings.setValue("rootDirectory", d)
         self.refresh()
-
-    def choose_links(self):
-        f, _ = QFileDialog.getOpenFileName(self, "Файл ссылок", str(self.effective_links().parent), "Excel (*.xlsx)")
-        if f:
-            self.set_links(f)
-
-    def create_links(self):
-        f, _ = QFileDialog.getSaveFileName(self, "Новый файл ссылок", str(self.target / "links.xlsx"), "Excel (*.xlsx)")
-        if f:
-            self.set_links(f if f.lower().endswith(".xlsx") else f + ".xlsx")
 
     def dragEnterEvent(self, e):
         if not self.busy() and any(u.toLocalFile().lower().endswith(".xlsx") for u in e.mimeData().urls()):
@@ -588,8 +571,13 @@ class MainWindow(QMainWindow):
 
     # --- действия ---
 
+    def root_args(self):
+        """--root и прежний файл ссылок (до основной папки он выбирался вручную) — его переносят в «Ссылки» один раз."""
+        legacy = self._path_setting("linksFile", must_exist=True)
+        return ["--root", str(self.root)] + (["--legacy-links", str(legacy)] if legacy else [])
+
     def can_start(self):
-        return bool(self.source and self.table_type and not self.busy())
+        return bool(self.source and self.table_type and self.root and not self.busy())
 
     def busy(self):
         return self.phase in ("syncing", "running", "stopping")
@@ -610,7 +598,7 @@ class MainWindow(QMainWindow):
         elif self.can_start() and self.selected_stores():
             self.mode = "prices"
             self.begin("syncing")
-            self.launch("make_links", ["--file", str(self.source), "--links", str(self.effective_links())],
+            self.launch("make_links", ["--file", str(self.source)] + self.root_args(),
                         then=self.start_prices)
 
     def start_prices(self, code):
@@ -623,8 +611,8 @@ class MainWindow(QMainWindow):
         self.refresh()
         stores = self.selected_stores()
         only = [] if len(stores) == len(self.store_checks) else ["--stores", ",".join(stores)]
-        self.launch("run", ["--json", "--file", str(self.source), "--out", str(self.target),
-                            "--links", str(self.effective_links())] + only, then=self.finish_run)
+        self.launch("run", ["--json", "--file", str(self.source)] + self.root_args() + only,
+                    then=self.finish_run)
 
     def fill_links(self):
         if not self.can_start():
@@ -638,7 +626,7 @@ class MainWindow(QMainWindow):
             return
         self.mode = "links"
         self.begin("running")
-        self.launch("fill_links", ["--json", "--file", str(self.source), "--links", str(self.effective_links())],
+        self.launch("fill_links", ["--json", "--file", str(self.source)] + self.root_args(),
                     then=self.finish_run)
 
     def update_nosimo(self):
@@ -836,15 +824,27 @@ class MainWindow(QMainWindow):
             self.source_name.setText("Выберите Excel-файл или перетащите его в окно")
             self.source_dir.set_path("")
             self.badge.setVisible(False)
-        self.target_name.setText(f"📁 {self.target.name}")
-        self.target_hint.set_path(f"{short(self.target.parent)} — будет создана папка «Мониторинг "
-                                  f"{date.today().isoformat()}», скриншоты — в «Скриншоты»")
+        if self.root:
+            self.target_name.setText(f"📁 {self.root.name}")
+            self.target_hint.set_path(f"{short(self.root.parent)} — сегодня папка «{date.today().isoformat()}»: "
+                                      "ТВ, Смартфоны, Ссылки, Скриншоты, Логи")
+            self.root_btn.setText("Изменить…")
+        else:
+            self.target_name.setText("Выберите папку, где будут храниться таблицы, ссылки и скриншоты")
+            self.target_hint.set_path("")
+            self.root_btn.setText("Выбрать…")
         links = self.effective_links()
-        self.links_name.setText(f"🔗 {links.name}")
-        self.links_dir.set_path(short(links.parent))
-        self.links_hint.setText("ссылки М.Видео, DNS, МТС, samsungstore; новые артикулы добавляются автоматически"
-                                if links.exists() else "файла пока нет — будет создан и заполнен")
-        self.default_links_action.setVisible(self.links is not None)
+        if links and self.table_type:
+            self.links_name.setText(f"🔗 {links.name}")
+            self.links_dir.set_path(short(links.parent))
+            self.links_hint.setText("ссылки М.Видео, DNS, МТС, samsungstore; новые артикулы добавляются автоматически"
+                                    if links.exists() else "файла пока нет — будет создан при запуске "
+                                    "(прежний файл ссылок переносится)")
+        else:
+            self.links_name.setText("🔗 —")
+            self.links_dir.set_path("")
+            self.links_hint.setText("выберите таблицу и основную папку")
+        self.open_links_btn.setEnabled(bool(links and self.table_type and links.exists()))
         # карточки состояния
         self.idle_card.setVisible(self.phase == "idle")
         last = self.settings.value("lastResult")
@@ -937,6 +937,8 @@ def main():
     app.setStyleSheet(STYLE)
     w = MainWindow()
     w.show()
+    if not w.root:  # первый запуск — сразу спрашиваем, где создать основную папку
+        QTimer.singleShot(400, w.choose_root)
     sys.exit(app.exec())
 
 
