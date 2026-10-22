@@ -63,6 +63,10 @@ final class MonitorRunner {
     private(set) var errorCount = 0
     private(set) var missingLinks: [String] = []
     private(set) var syncMessages: [String] = []
+    /// Сайты, где сейчас висит заглушка антибота: человек может пройти проверку в окне Chrome.
+    private(set) var antibotSites: [String] = []
+    /// «DNS: повторяю ошибки (3)» — идёт повторный проход по ошибкам.
+    private(set) var retryNote: String?
     /// Последние строки обычного вывода — показываются, если прогон упал.
     private(set) var tailOutput: [String] = []
 
@@ -186,7 +190,7 @@ final class MonitorRunner {
         total = 0; done = 0; etaSeconds = nil; finishedAt = nil
         stores = []; feed = []; savedFiles = []; screenshots = []; logFile = nil
         errorCount = 0; missingLinks = []; syncMessages = []; tailOutput = []; crashed = false
-        changedCount = 0; notices = []
+        changedCount = 0; notices = []; antibotSites = []; retryNote = nil
         feedCounter = 0
         updateDockBadge()
     }
@@ -195,6 +199,7 @@ final class MonitorRunner {
         process = nil
         finishedAt = .now
         etaSeconds = nil
+        antibotSites = []; retryNote = nil
         NSApp.dockTile.badgeLabel = nil
         NSApp.requestUserAttention(.informationalRequest)
         NSSound(named: "Glass")?.play()
@@ -239,6 +244,20 @@ final class MonitorRunner {
                 : "Нечего обрабатывать: в файле ссылок нет ссылок для этой таблицы")
         case "screenshot":
             if let path = event["path"] as? String { screenshots.append(URL(filePath: path)) }
+        case "antibot":
+            let site = event["site"] as? String ?? "сайте"
+            if event["active"] as? Bool == true {
+                if !antibotSites.contains(site) { antibotSites.append(site) }
+                Self.showChrome()
+                NSApp.requestUserAttention(.criticalRequest)
+                NSSound(named: "Sosumi")?.play()
+            } else {
+                antibotSites.removeAll { $0 == site }
+            }
+        case "retry_round":
+            let store = event["store"] as? String ?? ""
+            let count = event["count"] as? Int ?? 0
+            retryNote = "\(store): повторяю ошибки (\(count)), круг \(event["round"] as? Int ?? 1) из \(event["rounds"] as? Int ?? 1)"
         case "summary":
             errorCount = event["errors"] as? Int ?? 0
             if let path = event["log"] as? String, !path.isEmpty { logFile = URL(filePath: path) }
@@ -254,7 +273,10 @@ final class MonitorRunner {
         case "ошибка": .error
         default: .missing
         }
+        // Повтор в конце прогона: прежняя ошибка стала ценой или «нет»
+        let retry = event["retry"] as? Bool == true
         if let index = stores.firstIndex(where: { $0.name == storeName }) {
+            if retry { stores[index].errors -= 1 }
             switch status {
             case .ok: stores[index].ok += 1
             case .missing: stores[index].missing += 1
@@ -264,7 +286,7 @@ final class MonitorRunner {
         done = event["done"] as? Int ?? done
         total = event["total"] as? Int ?? total
         etaSeconds = done < total ? event["eta"] as? Int : nil
-        if status == .error { errorCount += 1 }
+        if retry { errorCount -= 1 } else if status == .error { errorCount += 1 }
 
         feedCounter += 1
         let item = FeedItem(
@@ -278,6 +300,13 @@ final class MonitorRunner {
         feed.insert(item, at: 0)
         if feed.count > Self.feedLimit { feed.removeLast(feed.count - Self.feedLimit) }
         updateDockBadge()
+    }
+
+    /// Окно Chrome, открытое мониторингом, — вперёд (если запущено два Chrome, это самый поздний).
+    static func showChrome() {
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome")
+            .max { ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast) }?
+            .activate()
     }
 
     private func updateDockBadge() {

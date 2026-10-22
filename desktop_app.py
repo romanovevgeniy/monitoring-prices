@@ -213,7 +213,9 @@ class StoreRow:
             grid.addWidget(w, row, col)
         self.update()
 
-    def add(self, status):
+    def add(self, status, retry=False):
+        if retry:  # повтор в конце прогона: прежняя ошибка стала ценой или «нет»
+            self.errors -= 1
         if status == "ok":
             self.ok += 1
         elif status == "ошибка":
@@ -307,6 +309,7 @@ class MainWindow(QMainWindow):
         self.missing_links, self.notices, self.tail = [], [], []
         self.crashed = False
         self.fail_message = ""
+        self.antibot, self.retry_note = [], ""
 
     # --- построение интерфейса ---
 
@@ -434,6 +437,12 @@ class MainWindow(QMainWindow):
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
         v.addWidget(self.bar)
+        # Заглушка антибота: человек может пройти проверку в окне Chrome
+        self.antibot_banner = label("", None, wrap=True)
+        self.antibot_banner.setStyleSheet(f"background:{ORANGE}; color:white; border-radius:6px; padding:8px; font-weight:bold")
+        v.addWidget(self.antibot_banner)
+        self.retry_label = label("", "muted")
+        v.addWidget(self.retry_label)
         self.chrome_hint = label("Окно Chrome не закрывайте — без него Ozon и Wildberries не пускают", "caption")
         v.addWidget(self.chrome_hint)
         return c
@@ -733,6 +742,7 @@ class MainWindow(QMainWindow):
         self.phase = phase
         self.finished = time.time()
         self.process = None
+        self.antibot, self.retry_note = [], ""
         if self.stop_file and self.stop_file.exists():
             self.stop_file.unlink()
         QApplication.alert(self)
@@ -757,12 +767,14 @@ class MainWindow(QMainWindow):
         elif kind == "item":
             self.done, self.total = ev.get("done", self.done), ev.get("total", self.total)
             self.eta = ev.get("eta") if self.done < self.total else None
-            status = ev.get("status")
-            if status == "ошибка":
+            status, retry = ev.get("status"), bool(ev.get("retry"))
+            if retry:
+                self.errors -= 1
+            elif status == "ошибка":
                 self.errors += 1
             row = self.stores.get(ev.get("store"))
             if row:
-                row.add(status)
+                row.add(status, retry)
             sym = {"ok": "✓", "ошибка": "⚠"}.get(status, "–")
             item = QTreeWidgetItem([sym, ev.get("article", ""), ev.get("store", ""), fmt_price(ev.get("price")),
                                     ev.get("note", "")])
@@ -771,6 +783,18 @@ class MainWindow(QMainWindow):
             self.feed.insertTopLevelItem(0, item)
             while self.feed.topLevelItemCount() > FEED_LIMIT:
                 self.feed.takeTopLevelItem(self.feed.topLevelItemCount() - 1)
+        elif kind == "antibot":
+            site = ev.get("site") or "сайте"
+            if ev.get("active"):
+                if site not in self.antibot:
+                    self.antibot.append(site)
+                QApplication.alert(self)  # мигает значок на панели задач
+                QApplication.beep()
+            elif site in self.antibot:
+                self.antibot.remove(site)
+        elif kind == "retry_round":
+            self.retry_note = (f"↻ {ev.get('store')}: повторяю ошибки ({ev.get('count')}), "
+                               f"круг {ev.get('round')} из {ev.get('rounds')}")
         elif kind == "missing_links":
             self.missing_links = ev.get("items", [])
         elif kind == "saved":
@@ -890,6 +914,11 @@ class MainWindow(QMainWindow):
         self.bar.setValue(self.done)
         self.err_badge.setText(f"⚠ {self.errors}" if self.errors else "")
         self.chrome_hint.setVisible(busy and self.mode != "nosimo")
+        self.antibot_banner.setText(f"✋ Антибот: {', '.join(self.antibot)} — откройте окно Chrome и пройдите проверку, "
+                                    "если она не проходит сама")
+        self.antibot_banner.setVisible(busy and bool(self.antibot))
+        self.retry_label.setText(self.retry_note)
+        self.retry_label.setVisible(busy and bool(self.retry_note))
         self.refresh_timing()
         self.stores_card.setVisible(bool(self.stores))
         self.result_card.setVisible(self.phase in ("finished", "stopped", "failed"))

@@ -26,6 +26,7 @@ from excel import as_number, detect_table, write_table
 import layout
 from make_links_template import link_stores
 from screenshot import screenshot
+import stores as stores_mod
 from stores import STORE_IMPL, Result, StoreError, make_http_client
 
 from paths import DATA_DIR as ROOT, PROFILE_DIR, RESULTS_DIR  # noqa: E402  (рабочие файлы: проект или папка пользователя)
@@ -192,6 +193,16 @@ class Progress:
             self.tty.flush()
         return f"{bar} {pct:>3}% {self.done}/{self.total} {eta:<17}"
 
+    def retried(self, store, status):
+        """Повтор прошёл: ошибка превращается в найденную цену / «нет»."""
+        c = self.by_store[store]
+        c["ошибка"] -= 1
+        c[status] += 1
+
+    def line(self):
+        pct = self.done * 100 // self.total
+        return f"{'█' * (pct // 5) + '░' * (20 - pct // 5)} {pct:>3}% {self.done}/{self.total} {'повтор':<17}"
+
     def summary(self):
         lines = ["Итого по магазинам:"]
         for store, c in self.by_store.items():
@@ -199,44 +210,118 @@ class Progress:
         return "\n".join(lines)
 
 
+# Повторный проход в конце: ошибки, которые могут пройти со второго раза (антибот, таймаут, сайт не ответил).
+# «Ссылка на другой товар», «обновите ссылки» и т.п. повтор не исправит.
+RETRY_ROUNDS = 2
+RETRY_PAUSE = 30
+NO_RETRY = ("другой товар", "обновите ссылки", "не нашёл id", "проверьте вручную")
+
+
+def retryable(res):
+    return not any(m in res.note for m in NO_RETRY)
+
+
+async def fetch(func, target, url, article, ref, model):
+    try:
+        return await func(target, url=url, article=article, ref_price=ref, model=model)
+    except StoreError as e:
+        if "другой товар" in str(e):
+            raise
+        await asyncio.sleep(15)  # одна повторная попытка: таймауты и антибот обычно проходят
+    except Exception:
+        await asyncio.sleep(15)
+    return await func(target, url=url, article=article, ref_price=ref, model=model)
+
+
 async def run_store(store, items, page, http, results, log, progress):
     func, needs_browser, _ = STORE_IMPL[store]
     lo, hi = DELAY["browser" if needs_browser else "http"]
-    for tname, row, article, url, ref, model in items:
-        target = page if needs_browser else http
+    target = page if needs_browser else http
+    failed = []
+
+    def report(item, res, status, retry=False):
+        tname, row, article, *_ = item
+        if retry:
+            progress.retried(store, status)
+        line = progress.line() if retry else progress.tick(store, status)
+        price = res.price if res.price is not None else "-"
+        mark = " (повтор)" if retry else ""
+        print(f"{line} [{STORES[store]:<24}] {article:<22} {status:<6} {price} {res.note}{mark}", flush=True)
+        emit("item", store=STORES[store], table=tname, article=article, status=status, price=res.price, note=res.note,
+             url=res.url, done=progress.done, total=progress.total, eta=progress.eta_sec, retry=retry)
+        log.append([datetime.now().strftime("%H:%M:%S"), tname, article, STORES[store], status, price, res.url,
+                    res.note + mark])
+
+    async def attempt(item):
+        tname, row, article, url, ref, model = item
+        try:
+            res = await fetch(func, target, url, article, ref, model)
+            results.setdefault(tname, {})[(row, store)] = res
+            return res, "ok" if res.price is not None else "нет"
+        except Exception as e:  # любая ошибка магазина не должна ронять весь прогон
+            return Result(None, url or "", f"{type(e).__name__}: {e}"), "ошибка"
+
+    for item in items:
+        tname, row, article, url, ref, model = item
         if url == "-":  # в links.xlsx отмечено, что товара в магазине нет
             res = Result(None, "", "нет в магазине (по links.xlsx)")
             results.setdefault(tname, {})[(row, store)] = res
-            log.append([datetime.now().strftime("%H:%M:%S"), tname, article, STORES[store], "нет", "-", "", res.note])
-            print(f"{progress.tick(store, 'нет')} [{STORES[store]:<24}] {article:<22} нет    - {res.note}", flush=True)
-            emit("item", store=STORES[store], table=tname, article=article, status="нет", price=None, note=res.note,
-                 url="", done=progress.done, total=progress.total, eta=progress.eta_sec)
+            report(item, res, "нет")
             continue
-        try:
-            try:
-                res = await func(target, url=url, article=article, ref_price=ref, model=model)
-            except StoreError as e:
-                if "другой товар" in str(e):
-                    raise
-                await asyncio.sleep(15)  # одна повторная попытка: таймауты и антибот обычно проходят
-                res = await func(target, url=url, article=article, ref_price=ref, model=model)
-            except Exception:
-                await asyncio.sleep(15)
-                res = await func(target, url=url, article=article, ref_price=ref, model=model)
-            status = "ok" if res.price is not None else "нет"
-            results.setdefault(tname, {})[(row, store)] = res
-        except Exception as e:  # любая ошибка магазина не должна ронять весь прогон
-            res, status = Result(None, url or "", f"{type(e).__name__}: {e}"), "ошибка"
-        price = res.price if res.price is not None else "-"
-        print(f"{progress.tick(store, status)} [{STORES[store]:<24}] {article:<22} {status:<6} {price} {res.note}", flush=True)
-        emit("item", store=STORES[store], table=tname, article=article, status=status, price=res.price, note=res.note,
-             url=res.url, done=progress.done, total=progress.total, eta=progress.eta_sec)
-        log.append([datetime.now().strftime("%H:%M:%S"), tname, article, STORES[store], status, price, res.url, res.note])
+        res, status = await attempt(item)
+        report(item, res, status)
+        if status == "ошибка" and retryable(res):
+            failed.append(item)
         await asyncio.sleep(random.uniform(lo, hi))
+
+    # Артикулы закончились — ещё раз по ошибкам: антибот к этому времени обычно отпускает
+    for n in range(1, RETRY_ROUNDS + 1):
+        if not failed:
+            break
+        print(f"\n{STORES[store]}: повторяю ошибки ({len(failed)}), круг {n} из {RETRY_ROUNDS}", flush=True)
+        emit("retry_round", store=STORES[store], count=len(failed), round=n, rounds=RETRY_ROUNDS)
+        await asyncio.sleep(RETRY_PAUSE)
+        still = []
+        for item in failed:
+            res, status = await attempt(item)
+            if status == "ошибка":
+                if retryable(res):
+                    still.append(item)
+            else:
+                report(item, res, status, retry=True)
+            await asyncio.sleep(random.uniform(lo, hi))
+        failed = still
+
+
+def antibot_hook(watching):
+    """Заглушка антибота на странице: окно Chrome — вперёд, сообщение в терминал и приложению."""
+    async def hook(page, site, active):
+        watching[site] = active
+        if active:
+            print(f"\n⚠ Антибот на {site}: откройте окно Chrome и пройдите проверку, если она не проходит сама\n",
+                  flush=True)
+            await bring_to_front(page)
+        emit("antibot", site=site, active=active)
+    return hook
+
+
+async def bring_to_front(page):
+    try:
+        await page.bring_to_front()
+        # Свернуть и развернуть — так окно выходит поверх остальных и на Mac, и на Windows
+        cdp = await page.context.new_cdp_session(page)
+        win = (await cdp.send("Browser.getWindowForTarget"))["windowId"]
+        for state in ("minimized", "normal"):
+            await cdp.send("Browser.setWindowBounds", {"windowId": win, "bounds": {"windowState": state}})
+            await asyncio.sleep(0.3)
+        await cdp.detach()
+    except Exception:
+        pass
 
 
 async def main(args):
     tables = selected_tables(args)
+    stores_mod.ANTIBOT_HOOK = antibot_hook({})
     if not await refresh_mvideo_links(args, tables):
         return
     links = load_all_links(args, tables)
@@ -319,7 +404,7 @@ async def main(args):
         w.writerow(["время", "таблица", "артикул", "магазин", "статус", "цена", "ссылка", "примечание"])
         w.writerows(log)
     print("\n" + progress.summary())
-    errors = sum(1 for r in log if r[4] == "ошибка")
+    errors = sum(c["ошибка"] for c in progress.by_store.values())
     print(f"Лог: {log_path}  (ошибок: {errors}; в ячейках с ошибкой оставлены старые значения)")
     emit("summary", errors=errors, log=str(log_path),
          stores={STORES[k]: dict(v) for k, v in progress.by_store.items()})

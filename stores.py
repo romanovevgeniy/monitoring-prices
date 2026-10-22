@@ -8,7 +8,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -101,19 +101,44 @@ ANTIBOT_MARKERS = ("Подозрительная активность", "Дос�
                    "Почти готово", "Antibot", "captcha")
 
 
-async def wait_antibot(page, max_wait=120):
-    """Если показана заглушка антибота — ждём, пока страница пропустит дальше."""
-    for _ in range(max_wait // 5):
+# Вызывается при появлении заглушки антибота (True) и когда страница пропустила дальше (False):
+# run.py выводит окно Chrome вперёд и сообщает приложению — человек может пройти проверку сам
+ANTIBOT_HOOK = None
+
+
+def _site(page):
+    return re.sub(r"^www\.", "", urlparse(page.url).hostname or "")
+
+
+async def _antibot_signal(page, active):
+    if ANTIBOT_HOOK:
         try:
-            title = await page.title()
-            body = (await page.inner_text("body"))[:600]
+            await ANTIBOT_HOOK(page, _site(page), active)
         except Exception:
+            pass
+
+
+async def wait_antibot(page, max_wait=180):
+    """Если показана заглушка антибота — ждём, пока страница пропустит дальше."""
+    shown = False
+    try:
+        for _ in range(max_wait // 5):
+            try:
+                title = await page.title()
+                body = (await page.inner_text("body"))[:600]
+            except Exception:
+                await asyncio.sleep(5)
+                continue
+            if title.strip(" .") and not any(m.lower() in (title + body).lower() for m in ANTIBOT_MARKERS):
+                return
+            if not shown and any(m.lower() in (title + body).lower() for m in ANTIBOT_MARKERS):
+                shown = True
+                await _antibot_signal(page, True)
             await asyncio.sleep(5)
-            continue
-        if title.strip(" .") and not any(m.lower() in (title + body).lower() for m in ANTIBOT_MARKERS):
-            return
-        await asyncio.sleep(5)
-    raise StoreError("антибот не пропустил за отведённое время")
+        raise StoreError("антибот не пропустил за отведённое время")
+    finally:
+        if shown:
+            await _antibot_signal(page, False)
 
 
 async def dns(page, url, article=None, model=None, **_):
@@ -226,7 +251,11 @@ async def _ozon_product_price(page, sku):
     try:
         await page.wait_for_selector('[id^="state-webPrice"]', state="attached", timeout=20000)
     except Exception:
-        return None
+        body = (await page.inner_text("body")).lower()
+        if any(w in body for w in OZON_GONE):
+            return None
+        # Ни цены, ни «закончился» — страница не загрузилась (антибот, сеть): ошибка, а не «нет в наличии»
+        raise StoreError("страница товара Ozon не загрузилась")
     # Зарубежные предложения (доплата таможенного платежа) — не российская версия товара
     if "таможен" in (await page.inner_text("body")).lower():
         return None
@@ -262,14 +291,24 @@ async def _ozon_grid_items(page):
     return [it for s in await _ozon_states(page, "tileGrid") for it in json.loads(s or "{}").get("items", [])]
 
 
+# Ozon прямо пишет, что товаров нет (в выдаче или на странице товара)
+OZON_EMPTY = ("ничего не нашлось", "ничего не найдено", "товаров сейчас нет", "не нашли")
+OZON_GONE = ("закончился", "нет в наличии", "недоступен к заказу", "товар не доставляется", "больше не продаётся")
+
+
 async def _ozon_open_search(page, url):
+    """True — выдача загрузилась, False — Ozon пишет, что ничего не нашлось. Иначе — ошибка."""
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await wait_antibot(page)
     try:
         await page.wait_for_selector('[id^="state-tileGrid"]', state="attached", timeout=25000)
         return True
     except Exception:
-        return False
+        body = (await page.inner_text("body")).lower()
+        if any(w in body for w in OZON_EMPTY):
+            return False
+        # Пустая страница без «ничего не нашлось» — антибот или сбой загрузки: не пишем «-», повторим позже
+        raise StoreError("выдача Ozon не загрузилась")
 
 
 async def _ozon_collect(page, article, ref_price):

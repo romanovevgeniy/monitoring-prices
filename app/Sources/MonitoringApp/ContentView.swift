@@ -346,6 +346,28 @@ private struct ProgressCard: View {
                 ProgressView(value: runner.fraction)
                     .progressViewStyle(.linear)
                     .tint(runner.phase == .stopping ? .orange : .accentColor)
+                if !runner.antibotSites.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "hand.raised.fill")
+                            .font(.title2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Антибот: \(runner.antibotSites.joined(separator: ", "))")
+                                .font(.headline)
+                            Text("Откройте окно Chrome и пройдите проверку, если она не проходит сама")
+                                .font(.callout)
+                        }
+                        Spacer()
+                        Button("Показать Chrome") { MonitorRunner.showChrome() }
+                    }
+                    .padding(10)
+                    .foregroundStyle(.white)
+                    .background(.orange, in: RoundedRectangle(cornerRadius: 8))
+                }
+                if let note = runner.retryNote, runner.isBusy {
+                    Label(note, systemImage: "arrow.clockwise")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
                 if runner.isBusy && runner.mode != .nosimo {
                     Label("Окно Chrome не закрывайте — без него Ozon и Wildberries не пускают", systemImage: "safari")
                         .font(.caption)

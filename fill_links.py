@@ -23,6 +23,7 @@ from playwright.async_api import async_playwright
 
 import layout
 import run
+import stores as stores_mod
 from config import LINKS_FILE, STORES
 from excel import detect_table
 from make_links_template import link_stores, table_articles, main as sync_links
@@ -281,4 +282,5 @@ def parse_args():
 if __name__ == "__main__":
     a = parse_args()
     run.JSON_EVENTS = a.json
+    stores_mod.ANTIBOT_HOOK = run.antibot_hook({})
     asyncio.run(fill(a))
