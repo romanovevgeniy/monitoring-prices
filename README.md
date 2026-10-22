@@ -8,11 +8,9 @@
 
 М.Видео · DNS · МТС · samsungstore · Ozon · Wildberries
 
-[![Сборка](https://github.com/romanovevgeniy/monitoring-prices/actions/workflows/build.yml/badge.svg)](https://github.com/romanovevgeniy/monitoring-prices/actions/workflows/build.yml)
+### [⬇ Скачать для Windows](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-Windows-Setup.exe) &nbsp;·&nbsp; [⬇ Скачать для Mac](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-macOS.dmg)
 
-### [⬇ Скачать для Windows](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-Windows-Setup.exe) &nbsp;·&nbsp; [⬇ Скачать для Mac](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-macOS.dmg)
-
-<sub>Все версии и что в них нового — на странице <a href="https://github.com/romanovevgeniy/monitoring-prices/releases">Releases</a></sub>
+<sub>Все версии и что в них нового — на странице <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases">Releases</a></sub>
 
 </div>
 
@@ -35,13 +33,13 @@
 <tr><th width="50%">Windows 10 / 11</th><th>macOS 26 и новее (Apple Silicon)</th></tr>
 <tr valign="top"><td>
 
-1. Скачайте [`MonitoringPrices-Windows-Setup.exe`](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-Windows-Setup.exe) и запустите.
+1. Скачайте [`MonitoringPrices-Windows-Setup.exe`](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-Windows-Setup.exe) и запустите.
 2. Если Windows покажет «Windows защитила ваш компьютер» — **Подробнее → Выполнить в любом случае** (у программы нет платной цифровой подписи).
 3. С **Kaspersky** и похожими антивирусами добавьте папку программы в исключения — иначе он может заблокировать её файлы, и программа не запустится.
 
 </td><td>
 
-1. Скачайте [`MonitoringPrices-macOS.dmg`](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-macOS.dmg), откройте и перетащите «Мониторинг цен» в «Программы».
+1. Скачайте [`MonitoringPrices-macOS.dmg`](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-macOS.dmg), откройте и перетащите «Мониторинг цен» в «Программы».
 2. При первом запуске macOS скажет, что не может проверить разработчика: **Системные настройки → Конфиденциальность и безопасность → «Всё равно открыть»** (у программы нет подписи Apple).
 
 </td></tr>
@@ -104,10 +102,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ### Сборка и релиз
 
-- **Релиз**: `git tag v1.2.0 && git push origin v1.2.0` — GitHub Actions ([`build.yml`](.github/workflows/build.yml)) соберёт оба установщика, проверит запуск и опубликует их на странице релиза. Описание релиза — `.github/release-notes/<тег>.md`.
-- **Проверочная сборка** без релиза: Actions → «Сборка» → Run workflow (файлы — в Artifacts).
-- **Локально**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
-- **Windows-установщик на Mac** (без Windows и без Actions): `APP_VERSION=1.2.0 ./build_windows_wine.sh` → `dist/MonitoringPrices-Windows-Setup.exe`; первый запуск сам ставит Wine, Python для Windows и Inno Setup. Загрузить в релиз: `gh release upload v1.2.0 dist/MonitoringPrices-Windows-Setup.exe`.
+- **Релиз** (GitLab, всё на этом Mac): `./release.sh 1.3.0` — тег, сборка установщиков для Mac (`build_dmg.sh`) и Windows (`build_windows_wine.sh`, через Wine), загрузка на GitLab и страница релиза. Описание релиза — `.github/release-notes/v1.3.0.md`. Ссылки «Скачать» выше всегда ведут на последний релиз.
+- **Локально по отдельности**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows на Mac — `APP_VERSION=1.3.0 ./build_windows_wine.sh` → `dist/MonitoringPrices-Windows-Setup.exe` (первый запуск сам ставит Wine, Python для Windows и Inno Setup); на Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
+- **Зеркало на GitHub** (`origin`): там же сборка через GitHub Actions по тегу ([`build.yml`](.github/workflows/build.yml)) — сейчас недоступна.
 
 ### Файлы
 
