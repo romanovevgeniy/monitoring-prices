@@ -1,6 +1,9 @@
 ﻿; Установщик «Мониторинг цен» для Windows (Inno Setup 6). Собирается из build_windows.ps1 после PyInstaller.
 #define AppName "Мониторинг цен"
-#define AppVersion "1.0"
+; Версию передаёт сборка: ISCC /DAppVersion=1.2.0 (по тегу релиза)
+#ifndef AppVersion
+  #define AppVersion "1.0"
+#endif
 #define AppExe "MonitoringPrices.exe"
 
 [Setup]

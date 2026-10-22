@@ -1,0 +1,82 @@
+# Сборка установщиков «Мониторинг цен» для Windows и Mac в облаке GitHub.
+#
+# Релиз: git tag v1.2.0 && git push origin v1.2.0 — обе сборки, затем страница релиза с файлами
+#   MonitoringPrices-Windows-Setup.exe и MonitoringPrices-macOS.dmg (ссылки «последняя версия» в README).
+# Проверочная сборка без релиза: вкладка Actions → «Сборка» → Run workflow (файлы — в Artifacts).
+name: Сборка
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # v1.2.0 → 1.2.0; без тега — 0.0.<номер запуска>
+  APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('0.0.{0}', github.run_number) }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Сборка (с проверкой установки и запуска)
+        shell: pwsh
+        run: |
+          $env:APP_VERSION = $env:APP_VERSION.TrimStart('v')
+          ./build_windows.ps1
+          Copy-Item (Get-ChildItem dist\*установка.exe | Select-Object -First 1).FullName dist\MonitoringPrices-Windows-Setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/MonitoringPrices-Windows-Setup.exe
+
+  mac:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Окружение Python
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt pyinstaller
+      - name: Сборка
+        run: |
+          export APP_VERSION="${APP_VERSION#v}"
+          ./build_dmg.sh
+          cp "dist/Мониторинг цен.dmg" dist/MonitoringPrices-macOS.dmg
+      - name: Проверка: встроенные скрипты запускаются
+        run: |
+          "dist/mac/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" run --help | head -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: dist/MonitoringPrices-macOS.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          [ -f "$notes" ] || notes=/dev/null
+          gh release create "$GITHUB_REF_NAME" out/MonitoringPrices-Windows-Setup.exe out/MonitoringPrices-macOS.dmg \
+            --title "Мониторинг цен ${GITHUB_REF_NAME}" --notes-file "$notes"

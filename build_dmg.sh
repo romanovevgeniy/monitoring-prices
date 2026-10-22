@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 APP_NAME="Мониторинг цен"
 STAGE="dist/mac"
 APP="$STAGE/$APP_NAME.app"
-PY=.venv/bin/python
+PY=${PYTHON:-.venv/bin/python}
 
 echo "== Скрипты (PyInstaller)"
 rm -rf build/tools dist/tools

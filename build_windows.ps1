@@ -47,7 +47,8 @@ Write-Host "== Установщик (Inno Setup)"
 $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
           "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) { throw "Не найден Inno Setup 6 (ISCC.exe). Установите с https://jrsoftware.org/isdl.php" }
-& $iscc installer.iss
+# Версия — из переменной APP_VERSION (сборка релиза по тегу v1.2.0), иначе — из installer.iss
+if ($env:APP_VERSION) { & $iscc "/DAppVersion=$env:APP_VERSION" installer.iss } else { & $iscc installer.iss }
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup: ошибка сборки установщика" }
 
 if ($env:CI) {
