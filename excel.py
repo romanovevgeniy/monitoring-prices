@@ -66,6 +66,8 @@ def write_table(table, src_path, dst_path, results, base_src_path=None):
                 cell.fill = copy(red_fill)
             elif not should_red and is_red(cell):
                 cell.fill = copy(default_fill[col])
+    # Результат открывается обычной таблицей, а не страничным режимом («Страница 1» и синие рамки печати)
+    ws.sheet_view.view = "normal"
     wb.save(dst_path)
     return changed
 
