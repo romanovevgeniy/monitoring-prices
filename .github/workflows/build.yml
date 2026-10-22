@@ -54,9 +54,9 @@ jobs:
           export APP_VERSION="${APP_VERSION#v}"
           ./build_dmg.sh
           cp "dist/Мониторинг цен.dmg" dist/MonitoringPrices-macOS.dmg
-      - name: Проверка: встроенные скрипты запускаются
+      - name: "Проверка: встроенные скрипты запускаются"
         run: |
-          "dist/mac/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" run --help | head -1
+          "dist/mac/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" run --help > /dev/null && echo "monitoring-tools запускается"
       - uses: actions/upload-artifact@v4
         with:
           name: mac
