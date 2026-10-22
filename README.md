@@ -107,6 +107,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - **Релиз**: `git tag v1.2.0 && git push origin v1.2.0` — GitHub Actions ([`build.yml`](.github/workflows/build.yml)) соберёт оба установщика, проверит запуск и опубликует их на странице релиза. Описание релиза — `.github/release-notes/<тег>.md`.
 - **Проверочная сборка** без релиза: Actions → «Сборка» → Run workflow (файлы — в Artifacts).
 - **Локально**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
+- **Windows-установщик на Mac** (без Windows и без Actions): `APP_VERSION=1.2.0 ./build_windows_wine.sh` → `dist/MonitoringPrices-Windows-Setup.exe`; первый запуск сам ставит Wine, Python для Windows и Inno Setup. Загрузить в релиз: `gh release upload v1.2.0 dist/MonitoringPrices-Windows-Setup.exe`.
 
 ### Файлы
 
