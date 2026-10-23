@@ -102,9 +102,10 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ### Сборка и релиз
 
-- **Релиз** (GitLab, всё на этом Mac): `./release.sh 1.3.0` — тег, сборка установщиков для Mac (`build_dmg.sh`) и Windows (`build_windows_wine.sh`, через Wine), загрузка на GitLab и страница релиза. Описание релиза — `.github/release-notes/v1.3.0.md`. Ссылки «Скачать» выше всегда ведут на последний релиз.
-- **Локально по отдельности**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows на Mac — `APP_VERSION=1.3.0 ./build_windows_wine.sh` → `dist/MonitoringPrices-Windows-Setup.exe` (первый запуск сам ставит Wine, Python для Windows и Inno Setup); на Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
-- **Зеркало на GitHub** (`origin`): там же сборка через GitHub Actions по тегу ([`build.yml`](.github/workflows/build.yml)) — сейчас недоступна.
+- **Релиз** — одна команда: `./release.sh 1.3.0`. Тег уходит на GitHub и GitLab, GitHub Actions ([`build.yml`](.github/workflows/build.yml)) собирает оба установщика (Windows-установщик проверяется установкой и запуском на настоящей Windows) и публикует релиз на GitHub, затем те же файлы выкладываются релизом на GitLab. Описание релиза — `.github/release-notes/v1.3.0.md`. Ссылки «Скачать» выше всегда ведут на последний релиз.
+- **Если Actions недоступны**: `./release.sh 1.3.0 --local` — всё собирается на этом Mac (Windows — через Wine, `build_windows_wine.sh`).
+- **Проверочная сборка** без релиза: GitHub → Actions → «Сборка» → Run workflow (файлы — в Artifacts).
+- **Локально по отдельности**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows на Mac — `APP_VERSION=1.3.0 ./build_windows_wine.sh`; на Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
 
 ### Файлы
 
