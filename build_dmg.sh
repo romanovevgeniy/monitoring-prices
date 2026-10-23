@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="Мониторинг цен"
-STAGE="dist/mac"
+STAGE="dist/mac.noindex"  # *.noindex — заготовка образа не попадает в Spotlight
 APP="$STAGE/$APP_NAME.app"
 PY=${PYTHON:-.venv/bin/python}
 
@@ -23,7 +23,7 @@ $PY -m PyInstaller --noconfirm --clean --log-level WARN \
 echo "== Приложение (SwiftUI)"
 app/build_app.sh >/dev/null
 rm -rf "$STAGE" && mkdir -p "$STAGE"
-cp -R "$APP_NAME.app" "$APP"
+cp -R "build/app.noindex/$APP_NAME.app" "$APP"
 RES="$APP/Contents/Resources"
 mkdir -p "$RES/tools" "$RES/docs" "$RES/assets"
 cp -R dist/tools/monitoring-tools "$RES/tools/"

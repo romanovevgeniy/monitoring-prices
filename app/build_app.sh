@@ -1,11 +1,12 @@
 #!/bin/zsh
-# Собирает «Мониторинг цен.app» и кладёт его в папку проекта (рядом с run.py — так приложение находит проект).
+# Собирает «Мониторинг цен.app» в build/app.noindex (папки *.noindex Spotlight не индексирует — в поиске
+# остаётся только установленное приложение). Без встроенных скриптов приложение находит проект само (~/Developer/monitoring).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="Мониторинг цен"
 PROJECT_DIR="$(cd .. && pwd)"
-APP="$PROJECT_DIR/$APP_NAME.app"
+APP="$PROJECT_DIR/build/app.noindex/$APP_NAME.app"
 BUILD=".build/bundle"
 
 swift build -c release
