@@ -21,8 +21,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Inno Setup
@@ -33,7 +33,7 @@ jobs:
           $env:APP_VERSION = $env:APP_VERSION.TrimStart('v')
           ./build_windows.ps1
           Copy-Item (Get-ChildItem dist\*установка.exe | Select-Object -First 1).FullName dist\MonitoringPrices-Windows-Setup.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/MonitoringPrices-Windows-Setup.exe
@@ -41,8 +41,8 @@ jobs:
   mac:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Окружение Python
@@ -57,7 +57,7 @@ jobs:
       - name: "Проверка: встроенные скрипты запускаются"
         run: |
           "dist/mac.noindex/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" run --help > /dev/null && echo "monitoring-tools запускается"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mac
           path: dist/MonitoringPrices-macOS.dmg
@@ -67,8 +67,8 @@ jobs:
     needs: [windows, mac]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: out
           merge-multiple: true
