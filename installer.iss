@@ -65,6 +65,6 @@ begin
            + 'Обычно их блокирует антивирус. Добавьте эту папку в исключения антивируса (или приостановите защиту '
            + 'на время установки) и запустите установку ещё раз.', mbError, MB_OK);
   if (CurStep = ssPostInstall) and not ChromeInstalled() then
-    MsgBox('Для работы программы нужен Google Chrome — установите его с https://www.google.com/chrome/ '
+    MsgBox('Для сбора цен по шаблону «Все магазины» нужен Google Chrome — установите его с https://www.google.com/chrome/ '
            + 'перед первым запуском мониторинга.', mbInformation, MB_OK);
 end;

@@ -7,14 +7,25 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+function Assert-NativeExit([string] $Stage) {
+    if ($LASTEXITCODE -ne 0) { throw "${Stage}: код $LASTEXITCODE" }
+}
+
 Write-Host "== Окружение"
-if (-not (Test-Path .venv-win)) { python -m venv .venv-win }
+if (-not (Test-Path .venv-win)) { python -m venv .venv-win; Assert-NativeExit "Создание окружения" }
 $py = ".\.venv-win\Scripts\python.exe"
 & $py -m pip install --upgrade pip
+Assert-NativeExit "Обновление pip"
 & $py -m pip install -r requirements.txt pyinstaller
+Assert-NativeExit "Установка зависимостей"
+
+Write-Host "== Проверки логики и редактора без Excel"
+& $py -m unittest discover -s tests -v
+Assert-NativeExit "Проверки логики и редактора"
 
 Write-Host "== Иконка"
 & $py -c "from PIL import Image; Image.open('assets/icon.png').save('assets/app.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+Assert-NativeExit "Сборка иконки"
 
 Write-Host "== Программа (PyInstaller)"
 & $py -m PyInstaller --noconfirm --clean --windowed `
@@ -26,7 +37,9 @@ Write-Host "== Программа (PyInstaller)"
     --hidden-import run --hidden-import fill_links --hidden-import nosimo `
     --hidden-import make_links_template --hidden-import screenshot --hidden-import excel_html `
     --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout --hidden-import monitoring_templates --hidden-import samsung_tv --hidden-import tv_report --hidden-import workbook_io --hidden-import workbook_layout `
+    --hidden-import workbook_editor --hidden-import workbook_document --hidden-import workbook_selftest `
     desktop_app.py
+Assert-NativeExit "Сборка приложения"
 
 Write-Host "== Скрипты (консольный monitoring-tools.exe)"
 & $py -m PyInstaller --noconfirm --clean --console `
@@ -36,6 +49,7 @@ Write-Host "== Скрипты (консольный monitoring-tools.exe)"
     --hidden-import make_links_template --hidden-import screenshot --hidden-import excel_html `
     --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout --hidden-import monitoring_templates --hidden-import samsung_tv --hidden-import tv_report --hidden-import workbook_io --hidden-import workbook_layout `
     tools_main.py
+Assert-NativeExit "Сборка скриптов"
 if (Test-Path dist\MonitoringPrices\tools) { Remove-Item -Recurse -Force dist\MonitoringPrices\tools }
 Copy-Item -Recurse dist\tools-build\monitoring-tools dist\MonitoringPrices\tools
 
@@ -56,12 +70,13 @@ if ($env:CI) {
     Write-Host "== Проверка: установка и запуск"
     $dir = "$env:ProgramFiles\Мониторинг цен — проверка"
     $setup = Get-ChildItem dist\*установка.exe | Select-Object -First 1
-    Start-Process $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`"" -Wait
+    $installed = Start-Process $setup.FullName -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`"" -Wait
+    if ($installed.ExitCode -ne 0) { throw "Установка: код $($installed.ExitCode)" }
     # при падении PyInstaller показывает окно с ошибкой и ждёт — поэтому ожидание с таймаутом
     $p = Start-Process "$dir\MonitoringPrices.exe" -ArgumentList "--selftest" -PassThru
     if (-not $p.WaitForExit(90000)) { $p.Kill(); throw "Установленная программа не запускается (окно ошибки, таймаут)" }
     if ($p.ExitCode -ne 0) { throw "Установленная программа не запускается (код $($p.ExitCode))" }
-    Write-Host "Установленная программа запускается"
+    Write-Host "Установленная программа открывает и сохраняет таблицы без Excel"
 }
 
 Write-Host "Готово: dist\Мониторинг цен — установка.exe"

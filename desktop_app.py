@@ -45,7 +45,8 @@ from paths import APP_DIR, FROZEN  # noqa: E402
 
 if len(sys.argv) > 1 and sys.argv[1] == "--selftest":  # проверка сборки: Qt загружается, окно создаётся
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
-    QApplication(sys.argv[:1])
+    from workbook_selftest import run_selftest
+    run_selftest()
     sys.exit(0)
 
 APP_NAME = "Мониторинг цен"
@@ -293,6 +294,22 @@ class MainWindow(QMainWindow):
         p = Path(v)
         return p if (not must_exist or p.exists()) else None
 
+    def open_workbook(self, path, mode="prices"):
+        if not path:
+            return
+        from workbook_editor import WorkbookEditor
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            dialog = WorkbookEditor(path, mode=mode, editable=not self.busy(), parent=self)
+        except Exception as error:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Не удалось открыть таблицу", str(error))
+            return
+        QApplication.restoreOverrideCursor()
+        dialog.exec()
+        dialog.document.close()
+        self.refresh()
+
     def effective_links(self):
         """Файл ссылок выбранной таблицы в «Ссылки» основной папки (создаётся или переносится при запуске)."""
         if not self.root:
@@ -359,7 +376,12 @@ class MainWindow(QMainWindow):
         g.addLayout(src, 0, 1)
         b_src = QPushButton("Выбрать…")
         b_src.clicked.connect(self.choose_source)
-        g.addWidget(b_src, 0, 2)
+        source_buttons = QHBoxLayout()
+        self.view_source_btn = QPushButton("Просмотр / НОСИМО")
+        self.view_source_btn.clicked.connect(lambda: self.open_workbook(self.source))
+        source_buttons.addWidget(self.view_source_btn)
+        source_buttons.addWidget(b_src)
+        g.addLayout(source_buttons, 0, 2)
 
         g.addWidget(label("Магазины", "muted"), 1, 0)
         stores_box = QVBoxLayout()
@@ -405,7 +427,7 @@ class MainWindow(QMainWindow):
         lk.addWidget(self.fill_btn)
         g.addLayout(lk, 3, 1)
         mb = self.open_links_btn = QPushButton("Открыть")
-        mb.clicked.connect(lambda: open_path(self.effective_links()))
+        mb.clicked.connect(lambda: self.open_workbook(self.effective_links(), mode="links"))
         g.addWidget(mb, 3, 2)
         self.setup_widgets = [b_src, b_tgt, mb]
         return c
@@ -421,7 +443,7 @@ class MainWindow(QMainWindow):
         self.last_btn = QPushButton()
         self.last_btn.setFlat(True)
         self.last_btn.setStyleSheet("color:#2f6fed; text-align:left; border:none; padding:0")
-        self.last_btn.clicked.connect(lambda: open_path(self.settings.value("lastResult")))
+        self.last_btn.clicked.connect(lambda: self.open_workbook(self.settings.value("lastResult")))
         v.addWidget(self.last_btn, 0, Qt.AlignLeft)
         return c
 
@@ -470,7 +492,7 @@ class MainWindow(QMainWindow):
         h = QHBoxLayout()
         self.open_btn = QPushButton()
         self.open_btn.setObjectName("primary")
-        self.open_btn.clicked.connect(lambda: self.saved and open_path(self.saved[0]))
+        self.open_btn.clicked.connect(lambda: self.saved and self.open_workbook(self.saved[0], mode="links" if self.mode == "links" else "prices"))
         self.shot_btn = QPushButton("🖼  Скриншот")
         self.shot_btn.clicked.connect(lambda: self.screenshots and open_path(self.screenshots[0]))
         self.reveal_btn = QPushButton("📁  Показать в папке")
@@ -478,7 +500,7 @@ class MainWindow(QMainWindow):
         self.log_btn = QPushButton("📄  Лог")
         self.log_btn.clicked.connect(lambda: self.log_file and open_path(self.log_file))
         self.links_btn = QPushButton("🔗  Открыть файл ссылок")
-        self.links_btn.clicked.connect(lambda: open_path(self.effective_links()))
+        self.links_btn.clicked.connect(lambda: self.open_workbook(self.effective_links(), mode="links"))
         for b in (self.open_btn, self.shot_btn, self.reveal_btn, self.log_btn, self.links_btn):
             h.addWidget(b)
         h.addStretch()
@@ -889,6 +911,7 @@ class MainWindow(QMainWindow):
         self.start_btn.style().polish(self.start_btn)
         self.start_btn.setEnabled(busy and self.phase != "stopping" or (self.can_start() and bool(self.selected_stores())))
         self.nosimo_btn.setEnabled(self.can_start())
+        self.view_source_btn.setEnabled(bool(self.source and self.table_type) and not busy)
         spb = self.active_template() == "tv-spb"
         self.header_hint.setText("samsungstore · Санкт-Петербург · сравнение с НОСИМО" if spb else
                                  "М.Видео · DNS · МТС · samsungstore · Ozon · WB")
@@ -999,7 +1022,7 @@ class MainWindow(QMainWindow):
         self.notice_label.setVisible(bool(self.notices))
         self.tail_box.setVisible(self.crashed and bool(self.tail))
         self.tail_box.setPlainText("\n".join(self.tail))
-        self.open_btn.setText("▦  Открыть файл ссылок" if self.mode == "links" else "▦  Открыть таблицу")
+        self.open_btn.setText("▦  Ссылки в программе" if self.mode == "links" else "▦  Таблица в программе")
         self.open_btn.setVisible(bool(self.saved))
         self.shot_btn.setVisible(bool(self.screenshots))
         self.reveal_btn.setVisible(bool(self.saved))

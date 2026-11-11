@@ -58,6 +58,7 @@ HIDDEN=(--hidden-import run --hidden-import fill_links --hidden-import nosimo --
 
 echo "== Программа (PyInstaller)"
 win "$PY" -m PyInstaller --noconfirm --clean --windowed --log-level WARN --name MonitoringPrices \
+  --hidden-import workbook_editor --hidden-import workbook_document --hidden-import workbook_selftest \
   --icon 'assets\app.ico' --add-data 'assets;assets' --add-data 'docs;docs' --collect-all playwright \
   "${HIDDEN[@]}" desktop_app.py
 
