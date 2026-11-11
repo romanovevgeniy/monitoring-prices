@@ -171,7 +171,8 @@ final class AppModel {
         let defaults = UserDefaults.standard
         let saved = defaults.stringArray(forKey: storesSettingsKey)
             ?? (isSpbTemplate ? nil : detectedTable.flatMap { defaults.stringArray(forKey: "stores.\($0)") })
-        selectedStores = Set(saved ?? availableStores.map(\.key)).intersection(availableStores.map(\.key))
+        selectedStores = availableStores.count == 1 ? Set(availableStores.map(\.key))
+            : Set(saved ?? availableStores.map(\.key)).intersection(availableStores.map(\.key))
     }
 
     func toggleStore(_ key: String) {

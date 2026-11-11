@@ -66,6 +66,9 @@ jobs:
       - name: "Проверка: встроенные скрипты запускаются"
         run: |
           "dist/mac.noindex/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" run --help > /dev/null && echo "monitoring-tools запускается"
+          python -c "import openpyxl; w=openpyxl.Workbook(); w.active.append(['Артикул','Розничная цена samsungstore СПБ','НОСИМО']); w.active.append([None]); w.active.append(['TEST',80,100]); w.save('/tmp/preview.xlsx')"
+          "dist/mac.noindex/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" preview --file /tmp/preview.xlsx --template tv-spb > /tmp/preview.json
+          python -c "import json; p=json.load(open('/tmp/preview.json')); assert p['count']==1 and p['rows'][0]['article']=='TEST'"
       - uses: actions/upload-artifact@v7
         with:
           name: mac
