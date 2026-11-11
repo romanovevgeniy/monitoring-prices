@@ -7,17 +7,8 @@ struct ContentView: View {
     let runner: MonitorRunner
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HeaderView(model: model, runner: runner)
-            SetupCard(model: model, disabled: runner.isBusy)
-            StatusSection(runner: runner)
-            if !runner.stores.isEmpty {
-                StoresCard(stores: runner.stores)
-            }
-            FeedCard(feed: runner.feed)
-        }
-        .padding(20)
-        .animation(.smooth, value: runner.phase)
+        GuidedWorkflowView(model: model, runner: runner)
+        .onChange(of: runner.phase) { _, _ in model.phaseChanged() }
         // Первый запуск: сразу спрашиваем, где создать основную папку
         .task {
             guard model.rootDirectory == nil else { return }
@@ -37,133 +28,51 @@ struct ContentView: View {
 
 // MARK: - Шапка и настройки
 
-private struct HeaderView: View {
-    let model: AppModel
-    let runner: MonitorRunner
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .frame(width: 52, height: 52)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Мониторинг цен").font(.largeTitle).bold()
-                Text(model.isSpbTemplate ? "samsungstore · Санкт-Петербург · сравнение с НОСИМО"
-                     : "М.Видео · DNS · МТС · samsungstore · Ozon · WB")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button {
-                model.openHelp()
-            } label: {
-                Image(systemName: "questionmark.circle")
-            }
-            .buttonStyle(.borderless)
-            .font(.title2)
-            .help("Справка — руководство пользователя (⌘?)")
-            .accessibilityLabel("Справка")
-            if runner.isBusy {
-                Button(role: .destructive) {
-                    runner.stop()
-                } label: {
-                    Label(runner.phase == .stopping ? "Останавливаю…" : "Остановить", systemImage: "stop.fill")
-                        .frame(minWidth: 130)
-                }
-                .controlSize(.large)
-                .disabled(runner.phase == .stopping)
-                .help("Остановить — уже собранное сохранится")
-            } else {
-                Button {
-                    model.updateNosimo()
-                } label: {
-                    Label("Цены НОСИМО", systemImage: "tag")
-                }
-                .controlSize(.large)
-                .disabled(!model.canStart)
-                .help("Заполнить колонку НОСИМО ценами с galaxystore.ru")
-                Button {
-                    model.start()
-                } label: {
-                    Label("Запустить", systemImage: "play.fill")
-                        .frame(minWidth: 130)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-                .disabled(!model.canStartPrices)
-            }
-        }
-    }
-}
-
 /// Что обновляем, по каким магазинам, куда сохраняем и где ссылки.
-private struct SetupCard: View {
+struct SetupCard: View {
     let model: AppModel
     let disabled: Bool
 
     var body: some View {
-        Card {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
-                GridRow {
-                    Text("Таблица").foregroundStyle(.secondary)
-                    sourceLabel
-                    Button("Выбрать…", action: chooseSource)
+        VStack(alignment: .leading, spacing: 15) {
+            Text("Таблица мониторинга").font(.headline)
+            sourceLabel
+            Button("Выбрать таблицу…", action: chooseSource)
+            if model.detectedTable == "ТВ" {
+                Text("Шаблон сбора").font(.headline).padding(.top, 6)
+                Picker("Шаблон мониторинга ТВ", selection: Binding(
+                    get: { model.monitoringTemplate }, set: { model.setTemplate($0) }
+                )) {
+                    Text("samsungstore · Санкт-Петербург").tag("tv-spb")
+                    if model.supportsAllStoresTemplate { Text("Все магазины").tag("all") }
                 }
-                if model.detectedTable == "ТВ" {
-                    Divider().gridCellUnsizedAxes(.horizontal)
-                    GridRow {
-                        Text("Шаблон").foregroundStyle(.secondary)
-                        Picker("Шаблон мониторинга ТВ", selection: Binding(
-                            get: { model.monitoringTemplate }, set: { model.setTemplate($0) }
-                        )) {
-                            Text("samsungstore · Санкт-Петербург").tag("tv-spb")
-                            if model.supportsAllStoresTemplate {
-                                Text("Все магазины").tag("all")
-                            }
-                        }
-                        .labelsHidden()
-                        .accessibilityLabel("Шаблон мониторинга ТВ")
-                        Text("")
-                    }
-                }
-                if !model.availableStores.isEmpty {
-                    Divider().gridCellUnsizedAxes(.horizontal)
-                    GridRow {
-                        Text("Магазины").foregroundStyle(.secondary)
-                        StoresPicker(model: model)
-                        Button(model.allStoresSelected ? "Снять все" : "Все") { model.toggleAllStores() }
-                    }
-                }
-                Divider().gridCellUnsizedAxes(.horizontal)
-                GridRow {
-                    Text("Основная папка").foregroundStyle(.secondary)
+                .labelsHidden()
+            }
+            if model.availableStores.count > 1 {
+                StoresPicker(model: model)
+                Button(model.allStoresSelected ? "Снять все" : "Все магазины") { model.toggleAllStores() }
+            }
+            DisclosureGroup("Папка и ссылки", isExpanded: Binding(
+                get: { model.showAdvanced || model.rootDirectory == nil }, set: { model.showAdvanced = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 12) {
                     rootLabel
-                    Button(model.rootDirectory == nil ? "Выбрать…" : "Изменить…") { model.chooseRoot() }
-                }
-                Divider().gridCellUnsizedAxes(.horizontal)
-                GridRow {
-                    Text("Ссылки").foregroundStyle(.secondary)
+                    Button(model.rootDirectory == nil ? "Выбрать папку…" : "Изменить папку…") { model.chooseRoot() }
                     if model.isSpbTemplate {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("samsungstore · Санкт-Петербург")
-                            Text("Карточки находятся автоматически. Город проверяется перед сбором цен.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text("samsungstore · Санкт-Петербург").font(.callout)
+                        Text("Карточки находятся автоматически. Город проверяется перед сбором цен.")
+                            .font(.caption).foregroundStyle(.secondary)
                     } else {
                         linksLabel
+                        Button("Открыть ссылки") {
+                            if let links = model.linksFile { NSWorkspace.shared.open(links) }
+                        }
+                        .disabled(!(model.linksFile.map { FileManager.default.fileExists(atPath: $0.path) } ?? false))
                     }
-                    Button("Открыть") {
-                        if let links = model.linksFile { NSWorkspace.shared.open(links) }
-                    }
-                    .disabled(model.isSpbTemplate || !(model.linksFile.map { FileManager.default.fileExists(atPath: $0.path) } ?? false))
-                    .opacity(model.isSpbTemplate ? 0 : 1)
-                }
+                }.padding(.top, 10)
             }
-            .disabled(disabled)
         }
+        .disabled(disabled || model.preview.isSaving)
     }
 
     @ViewBuilder
@@ -248,7 +157,7 @@ private struct StoresPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(model.availableStores) { store in
                     Toggle(store.name, isOn: Binding(
                         get: { model.selectedStores.contains(store.key) },
@@ -290,7 +199,7 @@ private struct PathLabel: View {
 
 // MARK: - Статус и прогресс
 
-private struct StatusSection: View {
+struct StatusSection: View {
     let runner: MonitorRunner
 
     var body: some View {
@@ -540,7 +449,7 @@ private struct ResultBanner: View {
 
 // MARK: - Магазины
 
-private struct StoresCard: View {
+struct StoresCard: View {
     let stores: [StoreProgress]
 
     var body: some View {
@@ -596,7 +505,7 @@ private struct CountBadge: View {
 
 // MARK: - Лента результатов
 
-private struct FeedCard: View {
+struct FeedCard: View {
     let feed: [FeedItem]
 
     var body: some View {
@@ -667,7 +576,7 @@ private struct FeedRow: View {
 
 // MARK: - Общее
 
-private struct Card<Content: View>: View {
+struct Card<Content: View>: View {
     var tint: Color? = nil
     var padding: Double = 14
     @ViewBuilder var content: Content

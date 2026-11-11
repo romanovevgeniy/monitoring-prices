@@ -19,7 +19,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
-TOOLS = {"run": "run", "fill_links": "fill_links", "nosimo": "nosimo", "make_links": "make_links_template"}
+TOOLS = {"run": "run", "fill_links": "fill_links", "nosimo": "nosimo", "make_links": "make_links_template", "preview": "workbook_preview"}
 
 
 def run_tool_and_exit():
@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from paths import APP_DIR, FROZEN  # noqa: E402
 
-if len(sys.argv) > 1 and sys.argv[1] == "--selftest":  # проверка сборки: Qt загружается, окно создаётся
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--selftest":  # проверка сборки: Qt загружается, окно создаётся
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from workbook_selftest import run_selftest
     run_selftest()
@@ -55,15 +55,24 @@ GREEN, ORANGE, RED, GRAY = "#2e9e4f", "#d9822b", "#d64545", "#8a8a8e"
 STYLE = """
 QWidget { color: #1d1d1f; }
 QLabel, QCheckBox, QPushButton, QToolButton { color: #1d1d1f; }
-QMainWindow, QWidget#root { background: #ffffff; }
+QMainWindow, QWidget#root { background: #f5f7fb; }
 QMenu { background: #ffffff; border: 1px solid #d0d0d5; }
 QMenu::item { padding: 5px 18px; }
 QMenu::item:selected { background: #e8efff; }
 QTreeWidget, QTextEdit { background: #ffffff; color: #1d1d1f; }
 QHeaderView::section { background: #f6f6f7; color: #6e6e73; border: none; padding: 4px; }
 QCheckBox { spacing: 6px; }
-QFrame#card { background: #f6f6f7; border: 1px solid #e3e3e6; border-radius: 12px; }
-QLabel#title { font-size: 26px; font-weight: 700; }
+QLabel#brand { font-size: 13px; font-weight: 600; }
+QLabel#section { font-size: 13px; font-weight: 600; }
+QPushButton#wizardStep { padding: 12px; text-align: left; background: transparent; }
+QPushButton#wizardStep[active="true"] { background: #ffffff; border-color: #2862e6; color: #173153; font-weight: 600; }
+QScrollArea { border: none; background: transparent; }
+QStackedWidget { background: transparent; }
+QTableWidget { background: #ffffff; border: 1px solid #dfe5ef; gridline-color: #e6ebf2; }
+QTableWidget::item { padding: 5px; }
+
+QFrame#card { background: #ffffff; border: 1px solid #e3e3e6; border-radius: 12px; }
+QLabel#title { font-size: 30px; font-weight: 700; }
 QLabel#muted, QLabel#caption { color: #6e6e73; }
 QLabel#caption { font-size: 11px; }
 QLabel#percent { font-size: 40px; font-weight: 700; }
@@ -238,11 +247,11 @@ class StoreRow:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, settings=None):
         super().__init__()
-        self.settings = QSettings(APP_NAME, APP_NAME)
+        self.settings = settings if settings is not None else QSettings(APP_NAME, APP_NAME)
         self.setWindowTitle(APP_NAME)
-        self.resize(900, 860)
+        self.resize(1120, 860)
         self.setMinimumSize(820, 680)
         self.setAcceptDrops(True)
 
@@ -258,25 +267,8 @@ class MainWindow(QMainWindow):
         self.store_checks = {}
         self.reset_state()
 
-        root = QWidget()
-        root.setObjectName("root")
-        self.setCentralWidget(root)
-        lay = QVBoxLayout(root)
-        lay.setContentsMargins(20, 20, 20, 20)
-        lay.setSpacing(14)
-        lay.addLayout(self._header())
-        lay.addWidget(self._setup_card())
-        self.idle_card = self._idle_card()
-        lay.addWidget(self.idle_card)
-        self.progress_card = self._progress_card()
-        lay.addWidget(self.progress_card)
-        self.result_card = self._result_card()
-        lay.addWidget(self.result_card)
-        self.stores_card = card()
-        self.stores_grid = QGridLayout(self.stores_card)
-        self.stores_grid.setColumnStretch(1, 1)
-        lay.addWidget(self.stores_card)
-        lay.addWidget(self._feed_card(), 1)
+        from desktop_wizard import GuidedLayout
+        self.wizard = GuidedLayout(self, PathLabel)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -287,6 +279,9 @@ class MainWindow(QMainWindow):
 
     # --- настройки ---
 
+    def open_guide(self):
+        open_help()
+
     def _path_setting(self, key, must_exist=False):
         v = self.settings.value(key)
         if not v:
@@ -295,7 +290,7 @@ class MainWindow(QMainWindow):
         return p if (not must_exist or p.exists()) else None
 
     def open_workbook(self, path, mode="prices"):
-        if not path:
+        if not path or not self.wizard.preview.save():
             return
         from workbook_editor import WorkbookEditor
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -308,6 +303,7 @@ class MainWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         dialog.exec()
         dialog.document.close()
+        self.wizard.reload()
         self.refresh()
 
     def effective_links(self):
@@ -329,123 +325,6 @@ class MainWindow(QMainWindow):
         self.antibot, self.retry_note = [], ""
 
     # --- построение интерфейса ---
-
-    def _header(self):
-        h = QHBoxLayout()
-        icon = QLabel()
-        icon.setPixmap(self.windowIcon().pixmap(52, 52))
-        h.addWidget(icon)
-        v = QVBoxLayout()
-        v.addWidget(label(APP_NAME, "title"))
-        self.header_hint = label("", "muted")
-        v.addWidget(self.header_hint)
-        h.addLayout(v, 1)
-        help_btn = QPushButton("?  Справка")
-        help_btn.setToolTip("Руководство пользователя (F1)")
-        help_btn.clicked.connect(open_help)
-        h.addWidget(help_btn)
-        QShortcut(QKeySequence(Qt.Key_F1), self, activated=open_help)
-        self.nosimo_btn = QPushButton("🏷  Цены НОСИМО")
-        self.nosimo_btn.setToolTip("Заполнить колонку НОСИМО ценами с galaxystore.ru")
-        self.nosimo_btn.clicked.connect(self.update_nosimo)
-        h.addWidget(self.nosimo_btn)
-        self.start_btn = QPushButton("▶  Запустить")
-        self.start_btn.setObjectName("primary")
-        self.start_btn.setMinimumWidth(150)
-        self.start_btn.clicked.connect(self.start_or_stop)
-        h.addWidget(self.start_btn)
-        return h
-
-    def _setup_card(self):
-        c = card()
-        g = QGridLayout(c)
-        g.setColumnStretch(1, 1)
-        g.setHorizontalSpacing(12)
-
-        g.addWidget(label("Таблица", "muted"), 0, 0)
-        src = QVBoxLayout()
-        top = QHBoxLayout()
-        self.source_name = label()
-        self.badge = label("", "badge")
-        top.addWidget(self.source_name)
-        top.addWidget(self.badge)
-        top.addStretch()
-        src.addLayout(top)
-        self.source_dir = PathLabel()
-        src.addWidget(self.source_dir)
-        g.addLayout(src, 0, 1)
-        b_src = QPushButton("Выбрать…")
-        b_src.clicked.connect(self.choose_source)
-        source_buttons = QHBoxLayout()
-        self.view_source_btn = QPushButton("Просмотр / НОСИМО")
-        self.view_source_btn.clicked.connect(lambda: self.open_workbook(self.source))
-        source_buttons.addWidget(self.view_source_btn)
-        source_buttons.addWidget(b_src)
-        g.addLayout(source_buttons, 0, 2)
-
-        g.addWidget(label("Магазины", "muted"), 1, 0)
-        stores_box = QVBoxLayout()
-        self.template_picker = QComboBox()
-        self.template_picker.setAccessibleName("Шаблон мониторинга ТВ")
-        self.template_picker.addItem("samsungstore · Санкт-Петербург", "tv-spb")
-        self.template_picker.addItem("Все магазины", "all")
-        self.template_picker.currentIndexChanged.connect(self.change_template)
-        stores_box.addWidget(self.template_picker)
-        self.stores_row = QHBoxLayout()
-        self.stores_row.setSpacing(16)
-        stores_box.addLayout(self.stores_row)
-        self.stores_warn = label("отметьте хотя бы один магазин", "warn")
-        stores_box.addWidget(self.stores_warn)
-        g.addLayout(stores_box, 1, 1)
-        self.all_stores_btn = QPushButton("Все")
-        self.all_stores_btn.clicked.connect(self.toggle_all_stores)
-        g.addWidget(self.all_stores_btn, 1, 2)
-
-        g.addWidget(label("Основная папка", "muted"), 2, 0)
-        tgt = QVBoxLayout()
-        self.target_name = label()
-        self.target_hint = PathLabel()
-        tgt.addWidget(self.target_name)
-        tgt.addWidget(self.target_hint)
-        g.addLayout(tgt, 2, 1)
-        self.root_btn = b_tgt = QPushButton("Изменить…")
-        b_tgt.clicked.connect(self.choose_root)
-        g.addWidget(b_tgt, 2, 2)
-
-        g.addWidget(label("Ссылки", "muted"), 3, 0)
-        lk = QVBoxLayout()
-        self.links_name = label()
-        self.links_dir = PathLabel()
-        self.links_hint = label("", "caption", wrap=True)
-        lk.addWidget(self.links_name)
-        lk.addWidget(self.links_dir)
-        lk.addWidget(self.links_hint)
-        self.fill_btn = QPushButton("✨  Заполнить автоматически")
-        self.fill_btn.setToolTip("Подобрать ссылки на товары для выбранной таблицы")
-        self.fill_btn.clicked.connect(self.fill_links)
-        self.fill_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        lk.addWidget(self.fill_btn)
-        g.addLayout(lk, 3, 1)
-        mb = self.open_links_btn = QPushButton("Открыть")
-        mb.clicked.connect(lambda: self.open_workbook(self.effective_links(), mode="links"))
-        g.addWidget(mb, 3, 2)
-        self.setup_widgets = [b_src, b_tgt, mb]
-        return c
-
-    def _idle_card(self):
-        c = card()
-        v = QVBoxLayout(c)
-        v.addWidget(label("Выберите таблицу, папку для результатов и нажмите «Запустить».  "
-                          "Таблицу можно просто перетащить в окно."))
-        v.addWidget(label("Цены НОСИМО берутся из таблицы — обновите их кнопкой «Цены НОСИМО» (galaxystore.ru) "
-                          "или внесите из 1С. Для шаблона «Все магазины» нужен Chrome: не закрывайте его во время прогона.",
-                          "muted", wrap=True))
-        self.last_btn = QPushButton()
-        self.last_btn.setFlat(True)
-        self.last_btn.setStyleSheet("color:#2f6fed; text-align:left; border:none; padding:0")
-        self.last_btn.clicked.connect(lambda: self.open_workbook(self.settings.value("lastResult")))
-        v.addWidget(self.last_btn, 0, Qt.AlignLeft)
-        return c
 
     def _progress_card(self):
         c = card()
@@ -562,6 +441,12 @@ class MainWindow(QMainWindow):
             return path
 
     def set_source(self, path):
+        if self.busy() or not self.wizard.preview.save():
+            return
+        self.phase = "idle"
+        self.reset_state()
+        self.feed.clear()
+        self.wizard.step = 0
         self.source = self.adopt_into_root(Path(path))
         self.settings.setValue("sourceFile", str(self.source))
         self.table_type = None
@@ -582,6 +467,7 @@ class MainWindow(QMainWindow):
         self.template_picker.setCurrentIndex(max(0, self.template_picker.findData(selected)))
         self.template_picker.blockSignals(False)
         self.build_store_checks(self.template_stores())
+        self.wizard.reload()
         self.refresh()
 
     def active_template(self):
@@ -594,8 +480,12 @@ class MainWindow(QMainWindow):
     def change_template(self, *_):
         if self.table_type != "ТВ" or self.busy():
             return
+        self.phase = "idle"
+        self.reset_state()
+        self.feed.clear()
         self.settings.setValue("template/ТВ", self.active_template())
         self.build_store_checks(self.template_stores())
+        self.wizard.reload()
         self.refresh()
 
     def stores_settings_key(self):
@@ -614,11 +504,10 @@ class MainWindow(QMainWindow):
         saved = set(saved if isinstance(saved, list) else ([saved] if saved else [])) if saved is not None else None
         for s in stores:
             cb = QCheckBox(s["name"])
-            cb.setChecked(saved is None or s["key"] in saved)
+            cb.setChecked(len(stores) == 1 or saved is None or s["key"] in saved)
             cb.toggled.connect(self.save_stores)
             self.stores_row.addWidget(cb)
             self.store_checks[s["key"]] = cb
-        self.stores_row.addStretch()
 
     def selected_stores(self):
         return [k for k, cb in self.store_checks.items() if cb.isChecked()]
@@ -627,6 +516,10 @@ class MainWindow(QMainWindow):
         if self.table_type:
             # пустой список QSettings сохраняет как None — храним явный маркер
             self.settings.setValue(self.stores_settings_key(), self.selected_stores() or [""])
+            self.phase = "idle"
+            self.reset_state()
+            self.feed.clear()
+            self.wizard.reload()
         self.refresh()
 
     def toggle_all_stores(self):
@@ -693,6 +586,8 @@ class MainWindow(QMainWindow):
         if self.busy():
             self.stop()
         elif self.can_start() and self.selected_stores():
+            if not self.wizard.preview.save():
+                return
             self.mode = "prices"
             self.begin("syncing")
             if self.active_template() == "tv-spb":
@@ -715,6 +610,8 @@ class MainWindow(QMainWindow):
                     then=self.finish_run)
 
     def fill_links(self):
+        if not self.wizard.preview.save():
+            return
         if not self.can_start() or self.active_template() == "tv-spb":
             return
         if not self.confirm("Заполнить ссылки автоматически?",
@@ -730,6 +627,8 @@ class MainWindow(QMainWindow):
                     then=self.finish_run)
 
     def update_nosimo(self):
+        if not self.wizard.preview.save():
+            return
         if not self.can_start():
             return
         if not self.confirm("Обновить цены НОСИМО с galaxystore.ru?",
@@ -802,6 +701,7 @@ class MainWindow(QMainWindow):
         self.phase = phase
         self.finished = time.time()
         self.process = None
+        self.wizard.reload()
         self.antibot, self.retry_note = [], ""
         if self.stop_file and self.stop_file.exists():
             self.stop_file.unlink()
@@ -973,7 +873,7 @@ class MainWindow(QMainWindow):
         self.open_links_btn.setVisible(not spb)
         self.open_links_btn.setEnabled(not busy and not spb and bool(links and self.table_type and links.exists()))
         # карточки состояния
-        self.idle_card.setVisible(self.phase == "idle")
+        self.idle_card.hide()
         last = self.settings.value("lastResult")
         self.last_btn.setVisible(bool(last and Path(last).exists()))
         if last:
@@ -985,7 +885,7 @@ class MainWindow(QMainWindow):
         self.bar.setMaximum(max(self.total, 1))
         self.bar.setValue(self.done)
         self.err_badge.setText(f"⚠ {self.errors}" if self.errors else "")
-        self.chrome_hint.setVisible(busy and self.mode != "nosimo")
+        self.chrome_hint.setVisible(busy and self.mode != "nosimo" and not spb)
         self.antibot_banner.setText(f"✋ Антибот: {', '.join(self.antibot)} — откройте окно Chrome и пройдите проверку, "
                                     "если она не проходит сама")
         self.antibot_banner.setVisible(busy and bool(self.antibot))
@@ -997,6 +897,7 @@ class MainWindow(QMainWindow):
         if self.result_card.isVisible():
             self.refresh_result()
         self.setWindowTitle(f"{APP_NAME} — {round(frac * 100)}%" if busy and self.total else APP_NAME)
+        self.wizard.sync()
 
     def refresh_result(self):
         if self.phase == "failed":
@@ -1034,6 +935,14 @@ class MainWindow(QMainWindow):
         self.missing_box.setPlainText("\n".join(self.missing_links))
 
     def closeEvent(self, e):
+        if not self.busy() and not self.wizard.preview.save():
+            answer = QMessageBox.question(self, "Не удалось сохранить цены",
+                "Закрыть без сохранения введённых цен? Существующий файл не изменится.",
+                QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
+            if answer != QMessageBox.Discard:
+                e.ignore()
+                return
+            self.wizard.preview.discard(confirm=False)
         if self.busy() and not self.confirm("Идёт прогон", "Остановить его и закрыть программу? "
                                             "Собранное сохранится.", "Остановить и закрыть"):
             e.ignore()

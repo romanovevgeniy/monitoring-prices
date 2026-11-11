@@ -48,4 +48,24 @@ def run_selftest():
                 raise RuntimeError('Проверка сохранения ссылки не прошла')
         finally:
             wb.close()
+        # Проверяем и полный пошаговый экран из установленного exe.
+        from PySide6.QtCore import QSettings
+        from desktop_app import MainWindow
+        settings = QSettings(str(root / 'wizard.ini'), QSettings.IniFormat)
+        settings.setValue('rootDirectory', str(root))
+        window = MainWindow(settings=settings)
+        window.set_source(path)
+        if not window.wizard.go(1):
+            raise RuntimeError('Не удалось перейти к нашим ценам')
+        grid = window.wizard.preview.grid
+        grid.item(0, grid.columnCount() - 1).setText('175')
+        if not window.wizard.go(2):
+            raise RuntimeError(window.wizard.preview.status.text())
+        wb = openpyxl.load_workbook(window.source)
+        try:
+            if wb.active['C3'].value != 175:
+                raise RuntimeError('Пошаговый интерфейс не сохранил НОСИМО')
+        finally:
+            wb.close()
+        window.close()
     return app

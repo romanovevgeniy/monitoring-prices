@@ -12,10 +12,11 @@ struct MonitoringApp: App {
     var body: some Scene {
         Window("Мониторинг цен", id: "main") {
             RootView(model: model)
-                .frame(minWidth: 820, minHeight: 680)
+                .frame(minWidth: 860, minHeight: 720)
+                .onAppear { appDelegate.model = model }
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 880, height: 860)
+        .defaultSize(width: 1120, height: 900)
         .commands {
             CommandGroup(replacing: .help) {
                 Button("Справка «Мониторинг цен»") { model.openHelp() }
@@ -26,6 +27,12 @@ struct MonitoringApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var model: AppModel?
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let model, model.needsCloseCheck else { return .terminateNow }
+        Task { sender.reply(toApplicationShouldTerminate: await model.prepareToClose()) }
+        return .terminateLater
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
@@ -42,6 +49,11 @@ final class AppModel {
     private(set) var runner: MonitorRunner?
     var showFolderPicker = false
     var wrongFolder = false
+    let preview = WorkbookPreview()
+    private(set) var guidedStep = 0
+    var showAdvanced = false
+    var showJournal = false
+    private var preparingToClose = false
 
     /// Таблица мониторинга, которую обновляем (любой .xlsx).
     private(set) var sourceFile: URL?
@@ -72,10 +84,10 @@ final class AppModel {
     private var legacyLinksFile: URL? { UserDefaults.standard.url(forKey: "linksFile") }
 
     var canStart: Bool {
-        sourceFile != nil && detectedTable != nil && rootDirectory != nil && !(runner?.isBusy ?? true)
+        sourceFile != nil && detectedTable != nil && rootDirectory != nil && !(runner?.isBusy ?? true) && !preview.isLoading && !preview.isSaving
     }
     /// «Запустить» — нужен хотя бы один отмеченный магазин.
-    var canStartPrices: Bool { canStart && !selectedStores.isEmpty }
+    var canStartPrices: Bool { canStart && !selectedStores.isEmpty && (preview.snapshot?.count ?? 0) > 0 }
     var allStoresSelected: Bool { !availableStores.isEmpty && selectedStores.count == availableStores.count }
 
     init() {
@@ -117,6 +129,13 @@ final class AppModel {
     }
 
     func setSource(_ chosen: URL) {
+        guard !(runner?.isBusy ?? false), !preview.isSaving else { return }
+        if preview.isDirty {
+            Task { if await preview.save(project: project) { setSource(chosen) } }
+            return
+        }
+        guidedStep = 0
+        runner = MonitorRunner(project: project)
         let url = adoptIntoRoot(chosen)
         sourceFile = url
         detectedTable = nil
@@ -133,6 +152,7 @@ final class AppModel {
             if !supportsAllStoresTemplate { monitoringTemplate = "tv-spb" }
             updateTemplateStores()
             isDetecting = false
+            refreshPreview()
         }
     }
 
@@ -142,6 +162,8 @@ final class AppModel {
         monitoringTemplate = template
         UserDefaults.standard.set(template, forKey: "template.ТВ")
         updateTemplateStores()
+        runner = MonitorRunner(project: project)
+        refreshPreview()
     }
 
     private func updateTemplateStores() {
@@ -155,11 +177,15 @@ final class AppModel {
     func toggleStore(_ key: String) {
         if selectedStores.contains(key) { selectedStores.remove(key) } else { selectedStores.insert(key) }
         saveStores()
+        runner = MonitorRunner(project: project)
+        refreshPreview()
     }
 
     func toggleAllStores() {
         selectedStores = allStoresSelected ? [] : Set(availableStores.map(\.key))
         saveStores()
+        runner = MonitorRunner(project: project)
+        refreshPreview()
     }
 
     private func saveStores() {
@@ -219,7 +245,84 @@ final class AppModel {
         }
     }
 
+    var needsCloseCheck: Bool { preview.isDirty || preview.isSaving || runner?.isBusy == true }
+
+    func prepareToClose() async -> Bool {
+        guard !preparingToClose, !preview.isSaving else { return false }
+        preparingToClose = true
+        defer { preparingToClose = false }
+        if preview.isDirty {
+            let alert = NSAlert()
+            alert.messageText = "Сохранить изменения НОСИМО?"
+            alert.informativeText = "В таблице есть несохранённые цены."
+            alert.addButton(withTitle: "Сохранить")
+            alert.addButton(withTitle: "Не сохранять")
+            alert.addButton(withTitle: "Отмена")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                guard await preview.save(project: project) else { return false }
+            case .alertSecondButtonReturn: preview.discard(project: project, reload: false)
+            default: return false
+            }
+        }
+        if runner?.isBusy == true {
+            let alert = NSAlert()
+            alert.messageText = "Идёт мониторинг"
+            alert.informativeText = "Остановить сбор и закрыть программу? Уже собранные цены сохранятся."
+            alert.addButton(withTitle: "Остановить и закрыть")
+            alert.addButton(withTitle: "Отмена")
+            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+            runner?.stop()
+            for _ in 0..<150 {
+                if runner?.isBusy != true { return true }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            return false
+        }
+        return true
+    }
+
+    func requestStep(_ index: Int) {
+        guard (0...2).contains(index), !(runner?.isBusy ?? false), !preview.isSaving,
+              index == 0 || canStartPrices else { return }
+        Task {
+            guard await preview.save(project: project), !(runner?.isBusy ?? false) else { return }
+            guidedStep = index
+            refreshPreview()
+        }
+    }
+
+    func refreshPreview() {
+        let result: URL?
+        if guidedStep == 2, let runner, !runner.isBusy, runner.mode == .prices,
+           case .finished = runner.phase { result = runner.savedFiles.first }
+        else { result = nil }
+        preview.load(result ?? sourceFile, project: project, template: monitoringTemplate,
+                     stores: availableStores.map(\.key).filter(selectedStores.contains))
+    }
+
+    func phaseChanged() {
+        if runner?.isBusy == true { guidedStep = 2 }
+        else { refreshPreview() }
+    }
+
     func fillLinks() {
+        Task {
+            guard await preview.save(project: project) else { return }
+            performFillLinks()
+            if runner?.isBusy == true { guidedStep = 2 }
+        }
+    }
+
+    func updateNosimo() {
+        Task {
+            guard await preview.save(project: project) else { return }
+            performUpdateNosimo()
+            if runner?.isBusy == true { guidedStep = 2 }
+        }
+    }
+
+    private func performFillLinks() {
         guard canStart, !isSpbTemplate, let sourceFile, let rootDirectory else { return }
         let alert = NSAlert()
         alert.messageText = "Заполнить ссылки автоматически?"
@@ -235,7 +338,7 @@ final class AppModel {
         runner?.fillLinks(file: sourceFile, root: rootDirectory, links: linksFile, legacyLinks: legacyLinksFile)
     }
 
-    func updateNosimo() {
+    private func performUpdateNosimo() {
         guard canStart, let sourceFile else { return }
         let alert = NSAlert()
         alert.messageText = "Обновить цены НОСИМО с galaxystore.ru?"
@@ -251,12 +354,15 @@ final class AppModel {
     }
 
     func start() {
-        guard canStartPrices, let sourceFile, let rootDirectory else { return }
-        // все магазины — без фильтра; иначе только отмеченные
-        let stores = allStoresSelected ? [] : ["--stores", availableStores.map(\.key).filter(selectedStores.contains)
-            .joined(separator: ",")]
-        runner?.start(file: sourceFile, root: rootDirectory, links: linksFile, legacyLinks: legacyLinksFile,
-                      extraArguments: ["--template", monitoringTemplate] + stores)
+        guard canStartPrices else { return }
+        Task {
+            guard await preview.save(project: project), canStartPrices,
+                  let sourceFile, let rootDirectory else { return }
+            guidedStep = 2
+            let stores = allStoresSelected ? [] : ["--stores", availableStores.map(\.key).filter(selectedStores.contains).joined(separator: ",")]
+            runner?.start(file: sourceFile, root: rootDirectory, links: linksFile, legacyLinks: legacyLinksFile,
+                          extraArguments: ["--template", monitoringTemplate] + stores)
+        }
     }
 
     /// Папка дня в основной папке.

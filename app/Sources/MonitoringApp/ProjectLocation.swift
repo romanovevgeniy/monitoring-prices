@@ -18,7 +18,7 @@ final class ProjectLocation {
     }()
 
     private static let scriptTools = [
-        "run.py": "run", "fill_links.py": "fill_links", "nosimo.py": "nosimo", "make_links_template.py": "make_links",
+        "run.py": "run", "fill_links.py": "fill_links", "nosimo.py": "nosimo", "make_links_template.py": "make_links", "workbook_preview.py": "preview",
     ]
 
     init() {
