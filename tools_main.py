@@ -6,7 +6,7 @@ Mac-приложение (SwiftUI) и Windows-приложение (Qt) вызы
 import runpy
 import sys
 
-TOOLS = {"run": "run", "fill_links": "fill_links", "nosimo": "nosimo", "make_links": "make_links_template"}
+TOOLS = {"run": "run", "fill_links": "fill_links", "nosimo": "nosimo", "make_links": "make_links_template", "preview": "workbook_preview"}
 
 if __name__ == "__main__":
     # Вывод всегда в UTF-8 (приложения читают его так): в консоли Windows по умолчанию cp1252/cp866,
