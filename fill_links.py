@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+from workbook_io import atomic_save
+
 import openpyxl
 from playwright.async_api import async_playwright
 
@@ -182,7 +184,7 @@ async def fill(args):
             print(f"Резервная копия: {saved['backup']}")
         for (r, c), v in changed:
             ws.cell(r, c).value = v
-        wb.save(links_path)
+        atomic_save(wb, links_path)
         saved["changed"] += len(changed)
         print(f"{STORES[store]}: записано ссылок {len(changed)} — {links_path}", flush=True)
 
@@ -251,12 +253,16 @@ async def fill(args):
         tasks = [asyncio.create_task(do_store(s, await ctx.new_page() if s in BROWSER_STORES else None, http))
                  for s in stores]
         watcher = asyncio.create_task(run.StopWatcher(args.stop_file).watch(lambda: [t.cancel() for t in tasks]))
-        await asyncio.gather(*tasks, return_exceptions=True)
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        task_errors = [str(v) for v in outcomes if isinstance(v, Exception)]
         watcher.cancel()
         try:
             await ctx.close()
         except Exception:
             pass
+
+    if task_errors:
+        raise RuntimeError("Автозаполнение завершено не полностью: " + "; ".join(task_errors))
 
     print(f"\nОбновлено ссылок: {saved['changed']} — {links_path}")
     print(progress.summary())

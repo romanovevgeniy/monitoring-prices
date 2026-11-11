@@ -17,6 +17,8 @@ import shutil
 from datetime import date
 from pathlib import Path
 
+from workbook_io import atomic_save
+
 import openpyxl
 
 from config import TABLES
@@ -93,5 +95,5 @@ def _copy_sheet(best, path, table_name):
     wb = openpyxl.load_workbook(best)
     for name in [s for s in wb.sheetnames if s != table_name and s in {t["name"] for t in TABLES}]:
         wb.remove(wb[name])
-    wb.save(path)
+    atomic_save(wb, path)
     print(f"Файл ссылок {table_name}: перенесён из {best} в {path}")

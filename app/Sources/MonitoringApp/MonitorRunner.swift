@@ -99,8 +99,11 @@ final class MonitorRunner {
         phase = .syncingLinks
         startedAt = .now
         Task {
-            let syncStatus = await execute(["make_links_template.py", "--file", file.path] + rootArguments, in: dir) { line in
-                self.syncMessages.append(line)
+            var syncStatus: Int32 = 0
+            if !extraArguments.contains("tv-spb") {
+                syncStatus = await execute(["make_links_template.py", "--file", file.path] + rootArguments, in: dir) { line in
+                    self.syncMessages.append(line)
+                }
             }
             if phase == .stopping {  // остановили во время синхронизации файла ссылок
                 phase = .finished(stopped: true)
@@ -239,9 +242,9 @@ final class MonitorRunner {
             let names = (event["stores"] as? [String] ?? []).joined(separator: ", ")
             notices.append("Автозаполнение пока не умеет: \(names) — эти ссылки вставляются вручную")
         case "nothing":
-            phase = .failed(mode == .links
+            phase = .failed(event["message"] as? String ?? (mode == .links
                 ? "Для этой таблицы автозаполнение пока не поддерживается"
-                : "Нечего обрабатывать: в файле ссылок нет ссылок для этой таблицы")
+                : "Нечего обрабатывать: в файле ссылок нет ссылок для этой таблицы"))
         case "screenshot":
             if let path = event["path"] as? String { screenshots.append(URL(filePath: path)) }
         case "antibot":

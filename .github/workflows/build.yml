@@ -49,6 +49,8 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install -q -r requirements.txt pyinstaller
+      - name: Проверки логики
+        run: .venv/bin/python -m unittest discover -s tests -v
       - name: Сборка
         run: |
           export APP_VERSION="${APP_VERSION#v}"

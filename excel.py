@@ -6,6 +6,7 @@ import openpyxl
 from openpyxl.styles import PatternFill
 
 from config import RECOLOR_RED, RED_RGB, RED_THRESHOLD_PCT
+from workbook_io import atomic_save
 
 DASH = "-"
 
@@ -34,17 +35,39 @@ def as_number(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def write_table(table, src_path, dst_path, results, base_src_path=None):
+def write_table(table, src_path, dst_path, results, base_src_path=None, *,
+                previous_table=None, column_headers=None, preserve_view=False, worksheet_transform=None, clear_source_prices=False):
     """results: {(row, store): Result}. Возвращает число изменённых ячеек.
     base_src_path — исходник, откуда берутся цены НОСИМО (из 1С), если src_path — уже собранный ранее результат."""
-    wb = openpyxl.load_workbook(src_path)
+    current = base_src_path or src_path
+    wb = openpyxl.load_workbook(current)
     ws = wb.active
+    current_rows = article_rows(ws, table)
     base_col = table["base_col"]
-    if base_src_path and str(base_src_path) != str(src_path):
-        base_ws = openpyxl.load_workbook(base_src_path).active
-        for row in range(table["first_row"], ws.max_row + 1):
-            ws[f"{base_col}{row}"].value = base_ws[f"{base_col}{row}"].value
+    if clear_source_prices:
+        for row in current_rows.values():
+            for col in table["price_cols"].values():
+                ws[f"{col}{row}"].value = None
+    if str(current) != str(src_path):
+        old_wb = openpyxl.load_workbook(src_path)
+        try:
+            old_ws = old_wb.active
+            old_table = previous_table or detect_table(src_path) or table
+            old_rows = article_rows(old_ws, old_table)
+            for article, row in current_rows.items():
+                if article not in old_rows:
+                    continue
+                for store, col in table["price_cols"].items():
+                    old_col = old_table["price_cols"].get(store)
+                    if old_col:
+                        ws[f"{col}{row}"].value = old_ws[f"{old_col}{old_rows[article]}"].value
+        finally:
+            old_wb.close()
     cols = table["price_cols"]
+    for store, header in (column_headers or {}).items():
+        ws[f"{cols[store]}1"].value = header
+    cached_wb = openpyxl.load_workbook(current, data_only=True)
+    cached_ws = cached_wb.active
     default_fill = column_default_fills(ws, cols.values(), table["first_row"])
     red_fill = PatternFill("solid", fgColor=RED_RGB)
     changed = 0
@@ -57,7 +80,7 @@ def write_table(table, src_path, dst_path, results, base_src_path=None):
     # Подсветка: красный — у конкурента дешевле, чем у НОСИМО. Пересчитываем все строки,
     # т.к. цены НОСИМО обновляются из 1С независимо от парсера.
     for row in range(table["first_row"], ws.max_row + 1) if RECOLOR_RED else []:
-        base = as_number(ws[f"{base_col}{row}"].value)
+        base = as_number(cached_ws[f"{base_col}{row}"].value)
         for col in cols.values():
             cell = ws[f"{col}{row}"]
             price = as_number(cell.value)
@@ -67,33 +90,63 @@ def write_table(table, src_path, dst_path, results, base_src_path=None):
             elif not should_red and is_red(cell):
                 cell.fill = copy(default_fill[col])
     # Результат открывается обычной таблицей, а не страничным режимом («Страница 1» и синие рамки печати)
-    ws.sheet_view.view = "normal"
-    wb.save(dst_path)
+    if not preserve_view:
+        ws.sheet_view.view = "normal"
+    if worksheet_transform:
+        worksheet_transform(ws, cached_ws)
+    cached_wb.close()
+    atomic_save(wb, dst_path)
+    wb.close()
     return changed
 
 
+def article_rows(ws, table):
+    rows = {}
+    for row in range(table["first_row"], ws.max_row + 1):
+        value = ws[f"{table['article_col']}{row}"].value
+        article = str(value).strip() if value is not None else ""
+        if not article:
+            continue
+        if article in rows:
+            raise ValueError(f"Повторяющийся артикул {article}: строки {rows[article]} и {row}")
+        rows[article] = row
+    return rows
+
+
 def detect_table(path):
-    """Тип таблицы по заголовкам первой строки и колонки по заголовкам → элемент config.TABLES с file=path, или None."""
+    """Определение типа и обязательных колонок; неоднозначные заголовки запрещают запись."""
     from openpyxl.utils import get_column_letter
     from config import HEADER_WORDS, TABLES
-    ws = openpyxl.load_workbook(path, read_only=True).active
-    header = {}
-    for c in next(ws.iter_rows(max_row=1)):
-        if c.value is not None and getattr(c, "column", None):
-            header[get_column_letter(c.column)] = str(c.value).lower()
+    wb = openpyxl.load_workbook(path, read_only=True)
+    try:
+        header = {get_column_letter(c.column): str(c.value).lower()
+                  for c in next(wb.active.iter_rows(max_row=1))
+                  if c.value is not None and getattr(c, "column", None)}
+    finally:
+        wb.close()
     joined = " ".join(header.values())
 
     def find(key):
-        return next((col for col, text in header.items() if any(w in text for w in HEADER_WORDS[key])), None)
+        cols = [col for col, text in header.items() if any(w in text for w in HEADER_WORDS[key])]
+        if len(cols) != 1:
+            raise ValueError(f"Не найдена однозначная колонка «{key}». Проверьте заголовки таблицы.")
+        return cols[0]
+
+    if len(header) == 3 and 'артикул' in joined and 'samsungstore' in joined and 'носимо' in joined:
+        found = dict(TABLES[0], file=str(path), source_template='tv-spb')
+        found['article_col'] = find('article')
+        found['base_col'] = find('base')
+        found['price_cols'] = {'samsungstore': find('samsungstore')}
+        return found
 
     for t in TABLES:
         if not all(w in joined for w in t["signature"]):
             continue
         found = dict(t, file=str(path))
-        found["article_col"] = find("article") or t["article_col"]
+        found["article_col"] = find("article")
         if t.get("name_col"):
-            found["name_col"] = find("name") or t["name_col"]
-        found["price_cols"] = {s: find(s) or col for s, col in t["price_cols"].items()}
-        found["base_col"] = find("base") or t["base_col"]
+            found["name_col"] = find("name")
+        found["price_cols"] = {store: find(store) for store in t["price_cols"]}
+        found["base_col"] = find("base")
         return found
     return None

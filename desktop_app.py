@@ -36,7 +36,7 @@ if len(sys.argv) > 2 and sys.argv[1] == "--tool":
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt, QTimer, QUrl  # noqa: E402
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QKeySequence, QPalette, QShortcut  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QApplication, QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QSizePolicy, QTextEdit, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -320,7 +320,8 @@ class MainWindow(QMainWindow):
         h.addWidget(icon)
         v = QVBoxLayout()
         v.addWidget(label(APP_NAME, "title"))
-        v.addWidget(label("М.Видео · DNS · МТС · samsungstore · Ozon · WB · Москва", "muted"))
+        self.header_hint = label("", "muted")
+        v.addWidget(self.header_hint)
         h.addLayout(v, 1)
         help_btn = QPushButton("?  Справка")
         help_btn.setToolTip("Руководство пользователя (F1)")
@@ -362,6 +363,12 @@ class MainWindow(QMainWindow):
 
         g.addWidget(label("Магазины", "muted"), 1, 0)
         stores_box = QVBoxLayout()
+        self.template_picker = QComboBox()
+        self.template_picker.setAccessibleName("Шаблон мониторинга ТВ")
+        self.template_picker.addItem("samsungstore · Санкт-Петербург", "tv-spb")
+        self.template_picker.addItem("Все магазины", "all")
+        self.template_picker.currentIndexChanged.connect(self.change_template)
+        stores_box.addWidget(self.template_picker)
         self.stores_row = QHBoxLayout()
         self.stores_row.setSpacing(16)
         stores_box.addLayout(self.stores_row)
@@ -409,7 +416,7 @@ class MainWindow(QMainWindow):
         v.addWidget(label("Выберите таблицу, папку для результатов и нажмите «Запустить».  "
                           "Таблицу можно просто перетащить в окно."))
         v.addWidget(label("Цены НОСИМО берутся из таблицы — обновите их кнопкой «Цены НОСИМО» (galaxystore.ru) "
-                          "или внесите из 1С. Во время прогона откроется окно Chrome: не закрывайте его.",
+                          "или внесите из 1С. Для шаблона «Все магазины» нужен Chrome: не закрывайте его во время прогона.",
                           "muted", wrap=True))
         self.last_btn = QPushButton()
         self.last_btn.setFlat(True)
@@ -543,17 +550,45 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         self.table_type = info.get("table")
-        self.build_store_checks(info.get("stores", []))
+        self.legacy_stores = info.get("stores", [])
+        self.template_picker.blockSignals(True)
+        self.template_picker.clear()
+        self.template_picker.addItem("samsungstore · Санкт-Петербург", "tv-spb")
+        if set(s["key"] for s in self.legacy_stores) != {"samsungstore"}:
+            self.template_picker.addItem("Все магазины", "all")
+        selected = self.settings.value("template/ТВ", "tv-spb") if self.table_type == "ТВ" else "all"
+        self.template_picker.setCurrentIndex(max(0, self.template_picker.findData(selected)))
+        self.template_picker.blockSignals(False)
+        self.build_store_checks(self.template_stores())
         self.refresh()
+
+    def active_template(self):
+        return self.template_picker.currentData() if self.table_type == "ТВ" else "all"
+
+    def template_stores(self):
+        return ([{"key": "samsungstore", "name": "samsungstore · Санкт-Петербург"}]
+                if self.active_template() == "tv-spb" else self.legacy_stores)
+
+    def change_template(self, *_):
+        if self.table_type != "ТВ" or self.busy():
+            return
+        self.settings.setValue("template/ТВ", self.active_template())
+        self.build_store_checks(self.template_stores())
+        self.refresh()
+
+    def stores_settings_key(self):
+        return (f"stores/{self.table_type}/tv-spb" if self.active_template() == "tv-spb"
+                else f"stores/{self.table_type}")
 
     def build_store_checks(self, stores):
         """Галочки магазинов выбранной таблицы; выбор запоминается отдельно для ТВ и смартфонов."""
         while self.stores_row.count():  # убрать прежние галочки и распорку
             item = self.stores_row.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         self.store_checks = {}
-        saved = self.settings.value(f"stores/{self.table_type}") if self.table_type else None
+        saved = self.settings.value(self.stores_settings_key()) if self.table_type else None
         saved = set(saved if isinstance(saved, list) else ([saved] if saved else [])) if saved is not None else None
         for s in stores:
             cb = QCheckBox(s["name"])
@@ -569,7 +604,7 @@ class MainWindow(QMainWindow):
     def save_stores(self, *_):
         if self.table_type:
             # пустой список QSettings сохраняет как None — храним явный маркер
-            self.settings.setValue(f"stores/{self.table_type}", self.selected_stores() or [""])
+            self.settings.setValue(self.stores_settings_key(), self.selected_stores() or [""])
         self.refresh()
 
     def toggle_all_stores(self):
@@ -638,8 +673,11 @@ class MainWindow(QMainWindow):
         elif self.can_start() and self.selected_stores():
             self.mode = "prices"
             self.begin("syncing")
-            self.launch("make_links", ["--file", str(self.source)] + self.root_args(),
-                        then=self.start_prices)
+            if self.active_template() == "tv-spb":
+                self.start_prices(0)
+            else:
+                self.launch("make_links", ["--file", str(self.source)] + self.root_args(),
+                            then=self.start_prices)
 
     def start_prices(self, code):
         if self.phase == "stopping":
@@ -651,11 +689,11 @@ class MainWindow(QMainWindow):
         self.refresh()
         stores = self.selected_stores()
         only = [] if len(stores) == len(self.store_checks) else ["--stores", ",".join(stores)]
-        self.launch("run", ["--json", "--file", str(self.source)] + self.root_args() + only,
+        self.launch("run", ["--json", "--file", str(self.source)] + self.root_args() + ["--template", self.active_template()] + only,
                     then=self.finish_run)
 
     def fill_links(self):
-        if not self.can_start():
+        if not self.can_start() or self.active_template() == "tv-spb":
             return
         if not self.confirm("Заполнить ссылки автоматически?",
                             f"Ссылки будут подобраны заново для таблицы «{self.source.name}»: ТВ — М.Видео и DNS, "
@@ -814,7 +852,7 @@ class MainWindow(QMainWindow):
                                 "эти ссылки вставляются вручную")
         elif kind == "nothing":
             self.phase = "failed"
-            self.fail_message = ("Для этой таблицы автозаполнение пока не поддерживается" if self.mode == "links"
+            self.fail_message = ev.get("message") or ("Для этой таблицы автозаполнение пока не поддерживается" if self.mode == "links"
                                  else "Нечего обрабатывать: в файле ссылок нет ссылок для этой таблицы")
         self.refresh()
 
@@ -851,7 +889,13 @@ class MainWindow(QMainWindow):
         self.start_btn.style().polish(self.start_btn)
         self.start_btn.setEnabled(busy and self.phase != "stopping" or (self.can_start() and bool(self.selected_stores())))
         self.nosimo_btn.setEnabled(self.can_start())
-        self.fill_btn.setEnabled(self.can_start())
+        spb = self.active_template() == "tv-spb"
+        self.header_hint.setText("samsungstore · Санкт-Петербург · сравнение с НОСИМО" if spb else
+                                 "М.Видео · DNS · МТС · samsungstore · Ozon · WB")
+        self.template_picker.setVisible(self.table_type == "ТВ")
+        self.template_picker.setEnabled(not busy)
+        self.fill_btn.setVisible(not spb)
+        self.fill_btn.setEnabled(self.can_start() and not spb)
         for w in self.setup_widgets:
             w.setEnabled(not busy)
         has_stores = bool(self.store_checks)
@@ -899,7 +943,12 @@ class MainWindow(QMainWindow):
             self.links_name.setText("🔗 —")
             self.links_dir.set_path("")
             self.links_hint.setText("выберите таблицу и основную папку")
-        self.open_links_btn.setEnabled(bool(links and self.table_type and links.exists()))
+        if spb:
+            self.links_name.setText("samsungstore · Санкт-Петербург")
+            self.links_dir.set_path("https://www.samsungstore.ru/catalog/televizory/")
+            self.links_hint.setText("Карточки находятся автоматически. Город проверяется перед сбором цен.")
+        self.open_links_btn.setVisible(not spb)
+        self.open_links_btn.setEnabled(not busy and not spb and bool(links and self.table_type and links.exists()))
         # карточки состояния
         self.idle_card.setVisible(self.phase == "idle")
         last = self.settings.value("lastResult")

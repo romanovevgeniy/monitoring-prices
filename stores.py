@@ -72,12 +72,17 @@ def ld_result(html, url):
     return Result(price, url, "" if in_stock else "нет в наличии, цена указана")
 
 
-async def http_ld(client: httpx.AsyncClient, url, **_):
+async def http_ld(client: httpx.AsyncClient, url, article=None, model=None, **_):
     r = await client.get(url)
     if r.status_code == 404:
         return Result(None, url, "страница не найдена (404)")
     if r.status_code != 200:
         raise StoreError(f"HTTP {r.status_code}")
+    offer = ld_offer(r.text)
+    if (article or model) and (not offer or not offer[2]):
+        raise StoreError("на странице нет названия товара для проверки")
+    if offer and not same_product(offer[2], article, model):
+        raise StoreError(f"ссылка ведёт на другой товар: «{offer[2]}» — проверьте links.xlsx")
     return ld_result(r.text, url)
 
 

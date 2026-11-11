@@ -51,6 +51,13 @@ final class AppModel {
     /// Магазины выбранной таблицы и отмеченные галочками (запоминаются отдельно для ТВ и смартфонов).
     private(set) var availableStores: [StoreOption] = []
     private(set) var selectedStores: Set<String> = []
+    private var legacyStores: [StoreOption] = []
+    private(set) var monitoringTemplate = "all"
+    var supportsAllStoresTemplate: Bool { Set(legacyStores.map(\.key)) != ["samsungstore"] }
+    var isSpbTemplate: Bool { detectedTable == "ТВ" && monitoringTemplate == "tv-spb" }
+    private var storesSettingsKey: String {
+        "stores.\(detectedTable ?? "")." + (isSpbTemplate ? "tv-spb" : "all")
+    }
     /// Основная папка: «Ссылки» (links_tv.xlsx, links_smart.xlsx) и папки дней «2026-10-22» с подпапками
     /// ТВ, Смартфоны, Ссылки (копия), Скриншоты, Логи. Спрашивается при первом запуске.
     private(set) var rootDirectory: URL?
@@ -119,12 +126,30 @@ final class AppModel {
         isDetecting = true
         Task {
             let result = await TableDetector.detect(url, project: project)
+            guard sourceFile == url else { return }
             detectedTable = result?.table
-            availableStores = result?.stores ?? []
-            let saved = detectedTable.flatMap { UserDefaults.standard.stringArray(forKey: "stores.\($0)") }
-            selectedStores = Set(saved ?? availableStores.map(\.key)).intersection(availableStores.map(\.key))
+            legacyStores = result?.stores ?? []
+            monitoringTemplate = detectedTable == "ТВ" ? (UserDefaults.standard.string(forKey: "template.ТВ") ?? "tv-spb") : "all"
+            if !supportsAllStoresTemplate { monitoringTemplate = "tv-spb" }
+            updateTemplateStores()
             isDetecting = false
         }
+    }
+
+    func setTemplate(_ template: String) {
+        guard detectedTable == "ТВ", canStart, ["all", "tv-spb"].contains(template) else { return }
+        guard template != "all" || supportsAllStoresTemplate else { return }
+        monitoringTemplate = template
+        UserDefaults.standard.set(template, forKey: "template.ТВ")
+        updateTemplateStores()
+    }
+
+    private func updateTemplateStores() {
+        availableStores = isSpbTemplate ? [StoreOption(key: "samsungstore", name: "samsungstore · Санкт-Петербург")] : legacyStores
+        let defaults = UserDefaults.standard
+        let saved = defaults.stringArray(forKey: storesSettingsKey)
+            ?? (isSpbTemplate ? nil : detectedTable.flatMap { defaults.stringArray(forKey: "stores.\($0)") })
+        selectedStores = Set(saved ?? availableStores.map(\.key)).intersection(availableStores.map(\.key))
     }
 
     func toggleStore(_ key: String) {
@@ -138,9 +163,9 @@ final class AppModel {
     }
 
     private func saveStores() {
-        guard let table = detectedTable else { return }
+        guard detectedTable != nil else { return }
         // порядок как в таблице — так удобнее читать в настройках
-        UserDefaults.standard.set(availableStores.map(\.key).filter(selectedStores.contains), forKey: "stores.\(table)")
+        UserDefaults.standard.set(availableStores.map(\.key).filter(selectedStores.contains), forKey: storesSettingsKey)
     }
 
     /// Выбор основной папки (при первом запуске — сразу). Можно создать новую прямо в окне выбора.
@@ -195,7 +220,7 @@ final class AppModel {
     }
 
     func fillLinks() {
-        guard canStart, let sourceFile, let rootDirectory else { return }
+        guard canStart, !isSpbTemplate, let sourceFile, let rootDirectory else { return }
         let alert = NSAlert()
         alert.messageText = "Заполнить ссылки автоматически?"
         alert.informativeText = """
@@ -231,7 +256,7 @@ final class AppModel {
         let stores = allStoresSelected ? [] : ["--stores", availableStores.map(\.key).filter(selectedStores.contains)
             .joined(separator: ",")]
         runner?.start(file: sourceFile, root: rootDirectory, links: linksFile, legacyLinks: legacyLinksFile,
-                      extraArguments: stores)
+                      extraArguments: ["--template", monitoringTemplate] + stores)
     }
 
     /// Папка дня в основной папке.

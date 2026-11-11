@@ -49,7 +49,8 @@ private struct HeaderView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Мониторинг цен").font(.largeTitle).bold()
-                Text("М.Видео · DNS · МТС · samsungstore · Ozon · WB · Москва")
+                Text(model.isSpbTemplate ? "samsungstore · Санкт-Петербург · сравнение с НОСИМО"
+                     : "М.Видео · DNS · МТС · samsungstore · Ozon · WB")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -111,6 +112,23 @@ private struct SetupCard: View {
                     sourceLabel
                     Button("Выбрать…", action: chooseSource)
                 }
+                if model.detectedTable == "ТВ" {
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    GridRow {
+                        Text("Шаблон").foregroundStyle(.secondary)
+                        Picker("Шаблон мониторинга ТВ", selection: Binding(
+                            get: { model.monitoringTemplate }, set: { model.setTemplate($0) }
+                        )) {
+                            Text("samsungstore · Санкт-Петербург").tag("tv-spb")
+                            if model.supportsAllStoresTemplate {
+                                Text("Все магазины").tag("all")
+                            }
+                        }
+                        .labelsHidden()
+                        .accessibilityLabel("Шаблон мониторинга ТВ")
+                        Text("")
+                    }
+                }
                 if !model.availableStores.isEmpty {
                     Divider().gridCellUnsizedAxes(.horizontal)
                     GridRow {
@@ -128,11 +146,20 @@ private struct SetupCard: View {
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow {
                     Text("Ссылки").foregroundStyle(.secondary)
-                    linksLabel
+                    if model.isSpbTemplate {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("samsungstore · Санкт-Петербург")
+                            Text("Карточки находятся автоматически. Город проверяется перед сбором цен.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        linksLabel
+                    }
                     Button("Открыть") {
                         if let links = model.linksFile { NSWorkspace.shared.open(links) }
                     }
-                    .disabled(!(model.linksFile.map { FileManager.default.fileExists(atPath: $0.path) } ?? false))
+                    .disabled(model.isSpbTemplate || !(model.linksFile.map { FileManager.default.fileExists(atPath: $0.path) } ?? false))
+                    .opacity(model.isSpbTemplate ? 0 : 1)
                 }
             }
             .disabled(disabled)

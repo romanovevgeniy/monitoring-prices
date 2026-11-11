@@ -17,7 +17,7 @@ $PY -m PyInstaller --noconfirm --clean --log-level WARN \
   --hidden-import run --hidden-import fill_links --hidden-import nosimo --hidden-import make_links_template \
   --hidden-import screenshot --hidden-import excel_html --hidden-import stores --hidden-import matching \
   --hidden-import excel --hidden-import config --hidden-import paths \
-  --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout \
+  --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout --hidden-import monitoring_templates --hidden-import samsung_tv --hidden-import tv_report --hidden-import workbook_io --hidden-import workbook_layout \
   tools_main.py
 
 echo "== Приложение (SwiftUI)"

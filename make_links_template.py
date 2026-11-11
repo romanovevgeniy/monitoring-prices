@@ -8,6 +8,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from workbook_io import atomic_save
+
 import openpyxl
 from openpyxl.styles import Font, PatternFill
 
@@ -82,7 +84,7 @@ def main(tables=TABLES, path=ROOT / LINKS_FILE):
         print(f"{t['name']}: добавлено {len(added)}" + (f" — {shown}" if added else ""))
         if gone:
             print(f"  нет в таблице мониторинга (перенесены в конец листа): {', '.join(gone)}")
-    wb.save(path)
+    atomic_save(wb, path)
     print(f"Сохранено: {path}. Вставьте ссылки в строки новых артикулов.")
 
 

@@ -14,6 +14,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from workbook_io import atomic_save
+
 import openpyxl
 
 import run
@@ -87,7 +89,7 @@ async def update(args):
         print(f"Резервная копия: {backup}")
         for r, v in changed:
             ws[f"{col}{r}"].value = v
-        wb.save(path)
+        atomic_save(wb, path)
     print(f"\nОбновлено цен НОСИМО: {len(changed)} — {path}")
     run.emit("saved", table=table["name"], path=str(path), changed=len(changed))
     errors = progress.by_store.get("galaxystore", {}).get("ошибка", 0)

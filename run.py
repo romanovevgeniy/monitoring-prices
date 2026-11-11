@@ -22,7 +22,10 @@ import openpyxl
 from playwright.async_api import async_playwright
 
 from config import GALAXYSTORE_URL, LINKS_FILE, STORES, TABLES
-from excel import as_number, detect_table, write_table
+from excel import as_number, article_rows, detect_table, write_table
+from monitoring_templates import apply_template, TV_SPB
+from samsung_tv import SamsungTV
+from tv_report import write_report
 import layout
 from make_links_template import link_stores
 from screenshot import screenshot
@@ -77,7 +80,8 @@ def links_path(args, table_name):
 def load_all_links(args, tables):
     links = {}
     for t in tables:
-        links.update(load_links(links_path(args, t["name"])))
+        if t.get("template") != TV_SPB:
+            links.update(load_links(links_path(args, t["name"])))
     return links
 
 
@@ -110,10 +114,12 @@ def selected_tables(args):
         t = detect_table(Path(args.file).expanduser().resolve())
         if not t:
             sys.exit(f"Не удалось определить тип таблицы по заголовкам: {args.file}")
-        return [t]
+        return [apply_template(t, getattr(args, "template", "all"))]
     # колонки — по заголовкам файла (detect_table), а не по буквам из config
-    return [detect_table(ROOT / t["file"]) or dict(t, file=str(ROOT / t["file"]))
-            for t in TABLES if not args.tables or t["name"] in args.tables]
+    template = getattr(args, "template", "all")
+    return [apply_template(detect_table(ROOT / t["file"]) or dict(t, file=str(ROOT / t["file"])), template)
+            for t in TABLES if (not args.tables or t["name"] in args.tables)
+            and (template != TV_SPB or t["name"] == "ТВ")]
 
 
 def output_dir(args):
@@ -128,6 +134,7 @@ def build_jobs(args, links, tables):
     jobs, missing = {}, []
     for t in tables:
         ws = openpyxl.load_workbook(t["file"]).active
+        article_rows(ws, t)
         base_col = t["base_col"]
         n = 0
         for row in range(t["first_row"], ws.max_row + 1):
@@ -150,10 +157,12 @@ def build_jobs(args, links, tables):
                 url = row_links.get(store)
                 if mode == "auto":
                     url = GALAXYSTORE_URL.format(article.replace("/", "-"))
+                if t.get("template") == TV_SPB:
+                    mode, url = "search", None
                 if mode == "link" and not url:
                     missing.append(f"{t['name']}: {article} — {STORES[store]}")
                     continue  # нет ссылки — ячейку не трогаем
-                ref = as_number(ws[f"{col}{row}"].value) or base_old
+                ref = None if t.get("template") == TV_SPB else as_number(ws[f"{col}{row}"].value) or base_old
                 jobs.setdefault(store, []).append((t["name"], row, article, url, ref, model))
     if missing:
         print(f"Нет ссылки в файле ссылок ({len(missing)}) — эти ячейки не обновятся:")
@@ -233,10 +242,13 @@ async def fetch(func, target, url, article, ref, model):
     return await func(target, url=url, article=article, ref_price=ref, model=model)
 
 
-async def run_store(store, items, page, http, results, log, progress):
+async def run_store(store, items, page, http, results, log, progress, override=None, display_name=None):
+    display_name = display_name or STORES[store]
     func, needs_browser, _ = STORE_IMPL[store]
     lo, hi = DELAY["browser" if needs_browser else "http"]
     target = page if needs_browser else http
+    if override:
+        func = override
     failed = []
 
     def report(item, res, status, retry=False):
@@ -246,10 +258,10 @@ async def run_store(store, items, page, http, results, log, progress):
         line = progress.line() if retry else progress.tick(store, status)
         price = res.price if res.price is not None else "-"
         mark = " (повтор)" if retry else ""
-        print(f"{line} [{STORES[store]:<24}] {article:<22} {status:<6} {price} {res.note}{mark}", flush=True)
-        emit("item", store=STORES[store], table=tname, article=article, status=status, price=res.price, note=res.note,
+        print(f"{line} [{display_name:<24}] {article:<22} {status:<6} {price} {res.note}{mark}", flush=True)
+        emit("item", store=display_name, table=tname, article=article, status=status, price=res.price, note=res.note,
              url=res.url, done=progress.done, total=progress.total, eta=progress.eta_sec, retry=retry)
-        log.append([datetime.now().strftime("%H:%M:%S"), tname, article, STORES[store], status, price, res.url,
+        log.append([datetime.now().strftime("%H:%M:%S"), tname, article, display_name, status, price, res.url,
                     res.note + mark])
 
     async def attempt(item):
@@ -278,8 +290,8 @@ async def run_store(store, items, page, http, results, log, progress):
     for n in range(1, RETRY_ROUNDS + 1):
         if not failed:
             break
-        print(f"\n{STORES[store]}: повторяю ошибки ({len(failed)}), круг {n} из {RETRY_ROUNDS}", flush=True)
-        emit("retry_round", store=STORES[store], count=len(failed), round=n, rounds=RETRY_ROUNDS)
+        print(f"\n{display_name}: повторяю ошибки ({len(failed)}), круг {n} из {RETRY_ROUNDS}", flush=True)
+        emit("retry_round", store=display_name, count=len(failed), round=n, rounds=RETRY_ROUNDS)
         await asyncio.sleep(RETRY_PAUSE)
         still = []
         for item in failed:
@@ -321,22 +333,34 @@ async def bring_to_front(page):
 
 async def main(args):
     tables = selected_tables(args)
+    spb = any(t.get("template") == TV_SPB for t in tables)
+    labels = dict(STORES)
+    if spb:
+        labels["samsungstore"] = "samsungstore · Санкт-Петербург"
+        if args.stores and set(args.stores) - {"samsungstore"}:
+            raise ValueError("Для шаблона СПБ доступен только samsungstore")
+        print("Шаблон: samsungstore · Санкт-Петербург. Сравнение с НОСИМО.")
     stores_mod.ANTIBOT_HOOK = antibot_hook({})
     if not await refresh_mvideo_links(args, tables):
         return
     links = load_all_links(args, tables)
     jobs = build_jobs(args, links, tables)
+    if not jobs and spb:
+        message = "Нечего обрабатывать: проверьте артикулы и фильтры выбранной таблицы ТВ"
+        print(message)
+        emit("nothing", message=message)
+        return
     if not jobs:
         files = ", ".join(str(links_path(args, t["name"])) for t in tables)
         print("Нечего обрабатывать: проверьте фильтры и ссылки в", files)
         emit("nothing", links=files)
         return
     for store, items in jobs.items():
-        print(f"{STORES[store]}: {len(items)} позиций")
-    results, log = {}, []
+        print(f"{labels[store]}: {len(items)} позиций")
+    results, log = ({t["name"]: {} for t in tables} if spb else {}), []
     progress = Progress({k: len(v) for k, v in jobs.items()})
     print(f"Всего: {progress.total} проверок\n")
-    emit("plan", total=progress.total, stores=[{"name": STORES[k], "total": len(v)} for k, v in jobs.items()])
+    emit("plan", total=progress.total, stores=[{"name": labels[k], "total": len(v)} for k, v in jobs.items()])
     need_browser = any(STORE_IMPL[s][1] for s in jobs)
     async with make_http_client() as http, async_playwright() as pw:
         ctx = None
@@ -347,9 +371,16 @@ async def main(args):
                 viewport={"width": 1400, "height": 900},
                 args=["--disable-blink-features=AutomationControlled"])
         tasks = []
+        site = SamsungTV(http) if spb else None
+
+        async def fetch_spb(_target, article, **_):
+            return await site.find(article)
+
         for store, items in jobs.items():
             page = await ctx.new_page() if STORE_IMPL[store][1] else None
-            tasks.append(asyncio.create_task(run_store(store, items, page, http, results, log, progress)))
+            tasks.append(asyncio.create_task(run_store(store, items, page, http, results, log, progress,
+                                                            override=fetch_spb if spb else None,
+                                                            display_name=labels[store])))
         stopped = False
 
         def stop():
@@ -359,7 +390,10 @@ async def main(args):
                 task.cancel()
 
         watcher = asyncio.create_task(StopWatcher(args.stop_file).watch(stop))
-        await asyncio.gather(*tasks, return_exceptions=True)
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        task_errors = [str(value) for value in outcomes if isinstance(value, Exception)]
+        for error in task_errors:
+            print(f"Авария задачи магазина: {error}", flush=True)
         watcher.cancel()
         if stopped:
             print(f"\nОстановлено пользователем: обработано {progress.done} из {progress.total}, собранное сохраняется")
@@ -379,16 +413,20 @@ async def main(args):
         src = Path(t["file"])
         # Основная папка: <день>/ТВ/<исходник>; --out: <папка с датой>/<исходник>; results/ — с датой в имени
         if args.root:
-            dst = layout.table_dir(args.root, t["name"]) / src.name
+            dst = layout.table_dir(args.root, t["name"]) / (f"{src.stem} — samsungstore СПБ.xlsx" if spb else src.name)
             dst.parent.mkdir(parents=True, exist_ok=True)
         else:
-            dst = out / (src.name if args.out else f"{src.stem}_{stamp}{src.suffix}")
+            dst = out / (f"{src.stem} — samsungstore СПБ_{stamp}.xlsx" if spb else
+                         (src.name if args.out else f"{src.stem}_{stamp}{src.suffix}"))
         # Повторный запуск в тот же день дописывает в уже собранный файл (например, перепроверка отдельных магазинов)
-        changed = write_table(t, dst if dst.exists() else src, dst, results[t["name"]], base_src_path=src)
+        changed = (write_report(t, src, dst, results[t["name"]]) if spb else
+                   write_table(t, dst if dst.exists() else src, dst, results[t["name"]], base_src_path=src))
         print(f"Сохранено: {dst}  (изменено ячеек: {changed})")
         emit("saved", table=t["name"], path=str(dst), changed=changed)
         png = layout.screenshot_path(args.root, t["name"]) if args.root else out / "Скриншоты" / f"{dst.stem}.png"
-        if args.root:
+        if args.root and spb:
+            png = png.with_name("ТВ — samsungstore СПБ.png")
+        if args.root and not spb:
             layout.snapshot_links(args.root, t["name"])
         try:
             await screenshot(dst, png)
@@ -407,7 +445,9 @@ async def main(args):
     errors = sum(c["ошибка"] for c in progress.by_store.values())
     print(f"Лог: {log_path}  (ошибок: {errors}; в ячейках с ошибкой оставлены старые значения)")
     emit("summary", errors=errors, log=str(log_path),
-         stores={STORES[k]: dict(v) for k, v in progress.by_store.items()})
+         stores={labels[k]: dict(v) for k, v in progress.by_store.items()})
+    if task_errors:
+        raise RuntimeError("Сбор завершён не полностью: " + "; ".join(task_errors))
 
 
 MVIDEO_REFRESH_LABEL = "М.Видео: обновление ссылок"
@@ -447,6 +487,8 @@ async def refresh_mvideo_links(args, tables):
 
 def parse_args():
     p = argparse.ArgumentParser(description="Мониторинг цен")
+    p.add_argument("--template", choices=["all", TV_SPB], default="all",
+                   help="all — прежние магазины; tv-spb — samsungstore Санкт-Петербург (ТВ)")
     p.add_argument("--tables", type=lambda s: s.split(","), help="ТВ,Смартфоны")
     p.add_argument("--file", help="таблица мониторинга (любой путь); тип определяется по заголовкам")
     p.add_argument("--out", help="папка для результатов; внутри создаётся «Мониторинг <дата>»")
@@ -472,7 +514,10 @@ if __name__ == "__main__":
     args = parse_args()
     if args.detect:
         t = detect_table(Path(args.detect).expanduser())
-        stores = [{"key": k, "name": STORES[k]} for k in t["price_cols"]] if t else []
+        if t:
+            t = apply_template(t, args.template)
+        stores = [{"key": k, "name": "samsungstore · Санкт-Петербург" if t.get("template") == TV_SPB else STORES[k]}
+                  for k in t["price_cols"]] if t else []
         print(json.dumps({"table": t and t["name"], "stores": stores}, ensure_ascii=False))
         sys.exit(0 if t else 1)
     JSON_EVENTS = args.json
