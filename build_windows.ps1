@@ -5,6 +5,8 @@
 #     powershell -ExecutionPolicy Bypass -File build_windows.ps1
 # Результат: dist\Мониторинг цен — установка.exe
 $ErrorActionPreference = "Stop"
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 Set-Location $PSScriptRoot
 
 function Assert-NativeExit([string] $Stage) {

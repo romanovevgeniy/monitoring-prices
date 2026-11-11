@@ -4,6 +4,9 @@ on:
     branches: ['**']
     tags: ['v*']
   pull_request:
+env:
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: utf-8
 permissions:
   contents: read
 jobs:
