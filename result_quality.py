@@ -1,5 +1,6 @@
 """Метаданные проверок вне Excel: свежесть, точный повтор и понятные ошибки."""
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -22,6 +23,8 @@ def failure_message(detail):
     for words,code,message,action in rules:
         if any(word in lowered for word in words):
             return dict(code=code,message=message,action=action,detail=text)
+    if isinstance(detail,ValueError):
+        return dict(code='validation',message=text,action='Проверьте выбранную таблицу и параметры запуска.',detail=text)
     return dict(code='operation',message='Не удалось завершить операцию.',
                 action='Проверьте сообщение в журнале и настройки выбранной таблицы.',detail=text)
 
@@ -37,12 +40,16 @@ def read_report(book):
         data=json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(data,dict) or data.get('schema')!=1 or not isinstance(data.get('records'),list):return {}
         if len(data['records'])>100000:return {}
+        if not all(isinstance(data.get(k),str) and data[k] for k in ('source','table','template')):return {}
         seen=set()
         for record in data['records']:
             if not isinstance(record,dict):return {}
             key=(record.get('article'),record.get('store'))
             if not all(isinstance(x,str) and x for x in key) or key in seen:return {}
             if record.get('status') not in ('ok','missing','error','pending'):return {}
+            if not all(isinstance(record.get(k,''),str) for k in ('note','checkedAt','verifiedAt')):return {}
+            value=record.get('value')
+            if value is not None and not (isinstance(value,str) or type(value) in (int,float) and math.isfinite(value)):return {}
             seen.add(key)
         return data
     except (OSError,ValueError,TypeError):
@@ -74,10 +81,10 @@ def cell_status(record,value,now=None):
     stamp=record.get('checkedAt') or ''
     if record['status']=='error':
         error=failure_message(record.get('note',''))
-        return dict(code='error',label='Ошибка · прежняя цена',checkedAt=record.get('verifiedAt') or '',
+        return dict(code='error',label='Ошибка · прежняя цена' if value not in (None,'-','') else 'Ошибка · нет подтверждения',checkedAt=record.get('verifiedAt') or '',
                     message=error['message']+' '+error['action'])
     if record['status']=='pending':
-        return dict(code='pending',label='Не обработано',checkedAt=record.get('verifiedAt') or '',message='В этом запуске цена не проверена.')
+        return dict(code='pending',label='Нет ссылки' if 'Нет ссылки' in record.get('note','') else 'Не обработано',checkedAt=record.get('verifiedAt') or '',message=record.get('note') or 'В этом запуске цена не проверена.')
     try:
         checked=datetime.fromisoformat(stamp)
         if checked.tzinfo is None or checked>now+timedelta(minutes=5):return unknown
@@ -95,6 +102,23 @@ def retry_pairs(book,source,template):
         raise ValueError('Отчёт повтора не соответствует исходной таблице и шаблону. Запустите новый сбор.')
     pairs={(data['table'],r['article'],r['store']) for r in data['records'] if r['status']=='error'}
     if not pairs:raise ValueError('В отчёте нет ошибочных позиций для повтора.')
+    import openpyxl
+    from excel import detect_table, article_rows
+    from monitoring_templates import apply_template
+    table=detect_table(Path(book))
+    if not table:raise ValueError('Результат изменён или не распознан. Запустите новый сбор.')
+    table=apply_template(table,template)
+    workbook=openpyxl.load_workbook(book,data_only=True)
+    try:
+        rows=article_rows(workbook.active,table)
+        for record in data['records']:
+            if record['status']!='error':continue
+            row=rows.get(record['article']);col=table['price_cols'].get(record['store'])
+            if not row or not col:
+                raise ValueError('В результате изменён артикул или магазин. Запустите новый сбор.')
+            if workbook.active[f'{col}{row}'].value!=record.get('value'):
+                raise ValueError('Результат изменён после проверки. Запустите новый сбор вместо повтора старого отчёта.')
+    finally:workbook.close()
     return pairs
 
 
@@ -113,7 +137,9 @@ def comparison_summary(rows):
 def write_run_report(table,source,destination,jobs,outcomes,previous_source=None):
     """После успешной записи xlsx связываем проверки с артикулом и фактической ценой."""
     import openpyxl
-    from excel import article_rows
+    from excel import article_rows, detect_table
+    from monitoring_templates import apply_template
+    actual=apply_template(detect_table(Path(destination)),table['template'])
     previous={}
     for path in [source,previous_source,destination]:
         if path:
@@ -122,8 +148,8 @@ def write_run_report(table,source,destination,jobs,outcomes,previous_source=None
     book=openpyxl.load_workbook(destination,data_only=True)
     records=[]
     try:
-        for article,row in article_rows(book.active,table).items():
-            for store,col in table['price_cols'].items():
+        for article,row in article_rows(book.active,actual).items():
+            for store,col in actual['price_cols'].items():
                 value=book.active[f'{col}{row}'].value
                 key=(article,store);old=previous.get(key)
                 if old and old.get('value')!=value:old=None

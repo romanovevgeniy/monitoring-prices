@@ -8,9 +8,10 @@ struct StoreProgress: Identifiable, Equatable {
     var ok = 0
     var missing = 0
     var errors = 0
+    var skipped = 0
 
     var id: String { name }
-    var done: Int { ok + missing + errors }
+    var done: Int { ok + missing + errors + skipped }
 }
 
 struct FeedItem: Identifiable, Equatable {
@@ -22,7 +23,7 @@ struct FeedItem: Identifiable, Equatable {
     let note: String
 
     enum Status: Equatable {
-        case ok, missing, error
+        case ok, missing, error, skipped
     }
 }
 
@@ -74,6 +75,7 @@ final class MonitorRunner {
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var feedCounter = 0
+    @ObservationIgnored private var failureReason: String?
     private static let feedLimit = 300
 
     init(project: ProjectLocation) {
@@ -110,7 +112,7 @@ final class MonitorRunner {
                 return finish()
             }
             guard syncStatus == 0 else {
-                phase = .failed("Не удалось обновить файл ссылок")
+                phase = .failed(failureReason ?? "Не удалось обновить файл ссылок. Проверьте права на папку.")
                 crashed = true
                 return finish()
             }
@@ -126,7 +128,7 @@ final class MonitorRunner {
             } else if status == 0 {
                 phase = .finished(stopped: false)
             } else {
-                phase = .failed("Прогон прервался с ошибкой (код \(status))")
+                phase = .failed(failureReason ?? "Не удалось завершить сбор. Откройте журнал и проверьте подключение к сайтам.")
                 crashed = true
             }
             finish()
@@ -167,7 +169,7 @@ final class MonitorRunner {
             } else if status == 0 {
                 phase = .finished(stopped: false)
             } else {
-                phase = .failed("Прервалось с ошибкой (код \(status))")
+                phase = .failed(failureReason ?? "Не удалось завершить операцию. Откройте журнал и проверьте права на файл.")
                 crashed = true
             }
             finish()
@@ -195,6 +197,7 @@ final class MonitorRunner {
         errorCount = 0; missingLinks = []; syncMessages = []; tailOutput = []; crashed = false
         changedCount = 0; notices = []; antibotSites = []; retryNote = nil
         feedCounter = 0
+        failureReason = nil
         updateDockBadge()
     }
 
@@ -220,6 +223,11 @@ final class MonitorRunner {
         else { return }
 
         switch type {
+        case "failure":
+            failureReason = (event["message"] as? String ?? "Не удалось завершить сбор.") + " " + (event["action"] as? String ?? "Откройте журнал.")
+            crashed = true
+        case "notice":
+            if let message = event["message"] as? String { notices.append(message) }
         case "plan":
             total = event["total"] as? Int ?? 0
             let list = event["stores"] as? [[String: Any]] ?? []
@@ -274,7 +282,8 @@ final class MonitorRunner {
         let status: FeedItem.Status = switch event["status"] as? String {
         case "ok": .ok
         case "ошибка": .error
-        default: .missing
+        case "нет": .missing
+        default: .skipped
         }
         // Повтор в конце прогона: прежняя ошибка стала ценой или «нет»
         let retry = event["retry"] as? Bool == true
@@ -284,6 +293,7 @@ final class MonitorRunner {
             case .ok: stores[index].ok += 1
             case .missing: stores[index].missing += 1
             case .error: stores[index].errors += 1
+            case .skipped: stores[index].skipped += 1
             }
         }
         done = event["done"] as? Int ?? done
@@ -319,7 +329,8 @@ final class MonitorRunner {
     /// Запускает скрипт и построчно отдаёт stdout+stderr. Возвращает код выхода.
     private func execute(_ arguments: [String], in dir: URL, onLine: @escaping (String) -> Void) async -> Int32 {
         guard let command = project.command(arguments) else {
-            onLine("Не найдены скрипты мониторинга")
+            failureReason = "Не найдены служебные файлы мониторинга. Переустановите приложение."
+            onLine("Не найдены служебные файлы мониторинга. Переустановите приложение.")
             return -1
         }
         let process = Process()
@@ -336,6 +347,7 @@ final class MonitorRunner {
         do {
             try process.run()
         } catch {
+            failureReason = "Не удалось запустить служебный процесс. Проверьте установку программы и права доступа."
             onLine("Не удалось запустить скрипт: \(error.localizedDescription)")
             return -1
         }

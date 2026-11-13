@@ -295,8 +295,9 @@ final class AppModel {
 
     func refreshPreview() {
         let result: URL?
-        if guidedStep == 2, let runner, !runner.isBusy, runner.mode == .prices,
-           case .finished = runner.phase { result = runner.savedFiles.first }
+        if guidedStep == 2, let runner, !runner.isBusy, runner.mode == .prices {
+            result = runner.savedFiles.first
+        }
         else { result = nil }
         preview.load(result ?? sourceFile, project: project, template: monitoringTemplate,
                      stores: availableStores.map(\.key).filter(selectedStores.contains))
@@ -352,6 +353,19 @@ final class AppModel {
         alert.addButton(withTitle: "Отмена")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         runner?.updateNosimo(file: sourceFile)
+    }
+
+    func retryFailed() {
+        guard canStartPrices else { return }
+        Task {
+            guard await preview.save(project: project), canStartPrices,
+                  !(preview.snapshot?.retryPairs.isEmpty ?? true),
+                  let report = preview.file, let sourceFile, let rootDirectory else { return }
+            guidedStep = 2
+            let stores = availableStores.map(\.key).filter(selectedStores.contains).joined(separator: ",")
+            runner?.start(file: sourceFile, root: rootDirectory, links: linksFile, legacyLinks: legacyLinksFile,
+                extraArguments: ["--template", monitoringTemplate, "--stores", stores, "--retry-report", report.path])
+        }
     }
 
     func start() {

@@ -21,7 +21,7 @@ struct GuidedWorkflowView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(model.isSpbTemplate ? "ТВ и акустика · Санкт-Петербург" : model.detectedTable ?? "Новый запуск")
                     .font(.caption).foregroundStyle(.secondary)
-                Text(runner.isBusy ? "Выполняем мониторинг" : titles[model.guidedStep])
+                Text(runner.isBusy ? "Выполняем мониторинг" : model.guidedStep == 2 && !runner.savedFiles.isEmpty && runner.mode == .prices ? "Результаты мониторинга" : titles[model.guidedStep])
                     .font(.system(size: 30, weight: .bold)).tracking(-0.6)
                 Text(hints[model.guidedStep]).foregroundStyle(.secondary)
             }
@@ -119,6 +119,11 @@ struct GuidedWorkflowView: View {
                 reviewField("Результат", model.rootDirectory?.path ?? "Выберите папку")
                 Label("Исходная таблица сохраняется. При ошибке сайта прежние цены остаются в результате, причина попадает в журнал.", systemImage: "checkmark.shield")
                     .font(.caption).foregroundStyle(.secondary)
+                if !(model.preview.snapshot?.retryPairs.isEmpty ?? true), !runner.isBusy {
+                    Button("Повторить ошибки (\(model.preview.snapshot?.retryPairs.count ?? 0))", systemImage: "arrow.clockwise") {
+                        model.retryFailed()
+                    }.disabled(!model.canStartPrices)
+                }
                 if let latest = model.project.latestResult {
                     Button("Открыть последний результат", systemImage: "tablecells") { NSWorkspace.shared.open(latest) }
                 }
@@ -148,23 +153,41 @@ private struct PricePreviewPanel: View {
                     if model.preview.isLoading || model.preview.isSaving { ProgressView().controlSize(.small) }
                 }
                 if let data = model.preview.snapshot {
+                    Text("Обновлено полностью: \(data.summary.updated) · Дешевле: \(data.summary.cheaper) · Товаров с ошибками: \(data.summary.errors)")
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    Text("Неподтверждённые: \(data.summary.unconfirmed) · Максимальная разница: \(data.summary.maxDifference.formatted(.number.precision(.fractionLength(0)))) ₽")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("Фильтр результатов", selection: Binding(get: { model.preview.filter }, set: { model.preview.filter = $0 })) {
+                        Text("Все товары").tag("all")
+                        Text("Конкурент дешевле").tag("cheaper")
+                        Text("Ошибки").tag("errors")
+                        Text("Неподтверждённые цены").tag("unconfirmed")
+                    }.pickerStyle(.menu)
                     ScrollView([.horizontal, .vertical]) {
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(spacing: 0) {
                                 Text("Артикул").frame(width: 175, alignment: .leading)
-                                ForEach(data.columns) { column in Text(column.name).frame(width: 125, alignment: .trailing) }
+                                ForEach(data.columns) { column in Text(column.name).frame(width: 155, alignment: .trailing) }
                                 Text("НОСИМО").frame(width: 120, alignment: .trailing)
                             }
                             .font(.caption).foregroundStyle(.secondary).padding(.vertical, 12)
                             Divider()
+                            if model.preview.visibleRows.isEmpty {
+                                Text("Нет товаров для выбранного фильтра.").font(.caption).padding(.vertical)
+                            }
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(data.rows) { row in
+                                ForEach(model.preview.visibleRows) { row in
                                     HStack(spacing: 0) {
                                         Text(row.article).font(.system(.callout, design: .monospaced)).frame(width: 175, alignment: .leading)
                                         ForEach(data.columns.indices, id: \.self) { index in
-                                            Text(row.prices[index]).monospacedDigit()
-                                                .foregroundStyle(row.lower[index] ? .red : .primary)
-                                                .frame(width: 125, alignment: .trailing)
+                                            VStack(alignment: .trailing, spacing: 4) {
+                                                Text(row.prices[index]).monospacedDigit()
+                                                    .foregroundStyle(row.lower[index] ? .red : .primary)
+                                                Text(row.statuses[index].label).font(.caption2)
+                                                    .foregroundStyle(["error", "pending", "stale", "unchecked"].contains(row.statuses[index].code) ? .orange : .secondary)
+                                            }
+                                            .frame(width: 155, alignment: .trailing)
+                                            .help(row.statuses[index].message + "\n" + row.statuses[index].checkedAt)
                                         }
                                         if model.guidedStep == 1 && !runner.isBusy {
                                             TextField("Цена", text: Binding(get: { model.preview.value(row) }, set: { model.preview.edit(row, value: $0) }))
@@ -175,7 +198,7 @@ private struct PricePreviewPanel: View {
                                         } else {
                                             Text(row.baseDisplay).monospacedDigit().frame(width: 120, alignment: .trailing)
                                         }
-                                    }.frame(minHeight: 42)
+                                    }.frame(minHeight: 58)
                                     Divider()
                                 }
                             }

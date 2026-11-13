@@ -19,6 +19,10 @@ class InlinePreview(QWidget):
         header=QHBoxLayout();self.title=QLabel('Предпросмотр таблицы')
         self.count=QLabel('');self.count.setObjectName('muted')
         header.addWidget(self.title);header.addStretch();header.addWidget(self.count);layout.addLayout(header)
+        self.summary_label=QLabel('');self.summary_label.setWordWrap(True);layout.addWidget(self.summary_label)
+        self.filter_combo=QComboBox();self.filter_combo.setAccessibleName('Фильтр результатов')
+        for title,key in [('Все товары','all'),('Конкурент дешевле','cheaper'),('Ошибки','errors'),('Неподтверждённые цены','unconfirmed')]:self.filter_combo.addItem(title,key)
+        self.filter_combo.currentIndexChanged.connect(self.apply_filter);layout.addWidget(self.filter_combo)
         self.grid=QTableWidget();self.grid.setAccessibleName('Предпросмотр и наши цены НОСИМО')
         self.grid.setAlternatingRowColors(False);self.grid.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.grid.setEditTriggers(QAbstractItemView.DoubleClicked|QAbstractItemView.EditKeyPressed)
@@ -33,11 +37,13 @@ class InlinePreview(QWidget):
     def load(self,path,template='all',stores=None):
         if not self.save():return False
         if not path:
-            self.snapshot=None;self.grid.clear();self.grid.setRowCount(0);return True
+            self.snapshot=None;self.path=None;self.grid.clear();self.grid.setRowCount(0)
+            self.summary_label.clear();self.count.clear();return True
         try:
             data=preview(path,template,stores)
         except Exception as error:
-            self.snapshot=None;self.grid.clear();self.grid.setRowCount(0)
+            self.snapshot=None;self.path=None;self.grid.clear();self.grid.setRowCount(0)
+            self.summary_label.clear();self.count.clear()
             self.status.setText(str(error));return False
         self.path=Path(path);self.set_snapshot(data);return True
 
@@ -49,20 +55,38 @@ class InlinePreview(QWidget):
         for i,row in enumerate(data['rows']):
             values=[row['article']]+row['prices']+[row['baseDisplay']]
             for j,text in enumerate(values):
-                item=QTableWidgetItem(text);item.setToolTip(text)
+                tip=text
+                if 0<j<len(values)-1:
+                    status=row['statuses'][j-1]
+                    text+='\n'+status['label']
+                    tip+='\n'+status['label']+'\n'+status['checkedAt']+'\n'+status['message']
+                item=QTableWidgetItem(text);item.setToolTip(tip)
                 item.setFlags(Qt.ItemIsEnabled|Qt.ItemIsSelectable)
                 if j==len(values)-1 and self.editable:item.setFlags(item.flags()|Qt.ItemIsEditable)
                 if j:item.setTextAlignment(Qt.AlignRight|Qt.AlignVCenter)
                 if 0<j<len(values)-1 and row['lower'][j-1]:item.setForeground(QColor('#b93836'))
                 self.grid.setItem(i,j,item)
-            self.grid.setRowHeight(i,42)
+            self.grid.setRowHeight(i,58)
         self.grid.resizeColumnsToContents();self.grid.horizontalHeader().setStretchLastSection(True)
         self.grid.setColumnWidth(0,max(160,self.grid.columnWidth(0)))
         self.grid.blockSignals(False)
         self.count.setText(f"{data['count']} товаров")
+        summary=data['summary']
+        self.summary_label.setText(f"Обновлено полностью: {summary['updated']} · Конкурент дешевле: {summary['cheaper']} · Товаров с ошибками: {summary['errors']}\n"
+            f"Неподтверждённые цены: {summary['unconfirmed']} · Максимальная разница: {summary['maxDifference']:,.0f} ₽")
+        self.apply_filter()
         self.status.setStyleSheet('');self.status.setText('Оформление файла Excel сохраняется.' if data['count'] else 'В таблице нет артикулов для мониторинга.')
         self.save_btn.setEnabled(False)
         self.discard_btn.setVisible(False)
+
+    def apply_filter(self,*_):
+        if not self.snapshot:return
+        key=self.filter_combo.currentData()
+        for index,row in enumerate(self.snapshot['rows']):
+            codes=[s['code'] for s in row['statuses']]
+            visible=(key=='all' or key=='cheaper' and row['cheaper'] or key=='errors' and 'error' in codes or
+                     key=='unconfirmed' and any(c not in ('fresh','unavailable') for c in codes))
+            self.grid.setRowHidden(index,not visible)
 
     def set_editable(self,value):
         self.editable=value;self.save_btn.setVisible(value)
@@ -213,7 +237,7 @@ class GuidedLayout:
 
     def preview_path(self):
         w=self.w
-        return (w.saved[0] if self.step==2 and w.phase in ('finished','stopped') and w.mode=='prices' and w.saved else w.source)
+        return (w.saved[0] if self.step==2 and w.phase in ('finished','stopped','failed') and w.mode=='prices' and w.saved else w.source)
 
     def reload(self):
         return self.preview.load(self.preview_path(),self.w.active_template(),self.w.selected_stores())
@@ -242,7 +266,14 @@ class GuidedLayout:
         self.pages.setCurrentIndex(self.step)
         self.title.setText('Собираем цены' if busy else self.titles[self.step])
         self.subtitle.setText(self.hints[self.step])
+        if self.step==2 and not busy and w.mode=='prices' and w.saved:
+            self.title.setText('Результаты мониторинга')
+            self.subtitle.setText('Сравните свежие цены и повторите ошибочные позиции при необходимости.')
         self.preview.set_editable(self.step==1 and not busy)
+        retry_count=len((self.preview.snapshot or {}).get('retryPairs',[]))
+        w.retry_failed_btn.setVisible(self.step==2 and not busy and w.mode=='prices' and bool(retry_count))
+        w.retry_failed_btn.setText(f'Повторить ошибки ({retry_count})')
+        w.retry_failed_btn.setEnabled(not busy and bool(retry_count))
         single=w.table_type=='ТВ' and w.template_picker.count()==1
         self.single_source.setVisible(single)
         self.single_source.setText(w.template_picker.currentText())

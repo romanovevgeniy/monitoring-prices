@@ -38,7 +38,7 @@ Write-Host "== Программа (PyInstaller)"
     --collect-all playwright `
     --hidden-import run --hidden-import fill_links --hidden-import nosimo `
     --hidden-import make_links_template --hidden-import screenshot --hidden-import excel_html `
-    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout --hidden-import monitoring_templates --hidden-import samsung_tv --hidden-import tv_report --hidden-import workbook_io --hidden-import workbook_layout --hidden-import workbook_preview --hidden-import workbook_document `
+    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout --hidden-import monitoring_templates --hidden-import samsung_tv --hidden-import tv_report --hidden-import workbook_io --hidden-import workbook_layout --hidden-import workbook_preview --hidden-import workbook_document --hidden-import result_quality `
     --hidden-import workbook_editor --hidden-import desktop_wizard --hidden-import workbook_document --hidden-import workbook_selftest `
     desktop_app.py
 Assert-NativeExit "Сборка приложения"
@@ -49,7 +49,7 @@ Write-Host "== Скрипты (консольный monitoring-tools.exe)"
     --collect-all playwright --exclude-module PySide6 --exclude-module tkinter `
     --hidden-import run --hidden-import fill_links --hidden-import nosimo `
     --hidden-import make_links_template --hidden-import screenshot --hidden-import excel_html `
-    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout --hidden-import monitoring_templates --hidden-import samsung_tv --hidden-import tv_report --hidden-import workbook_io --hidden-import workbook_layout --hidden-import workbook_preview --hidden-import workbook_document `
+    --hidden-import stores --hidden-import matching --hidden-import excel --hidden-import config --hidden-import paths --hidden-import phone_matching --hidden-import phone_sites --hidden-import layout --hidden-import monitoring_templates --hidden-import samsung_tv --hidden-import tv_report --hidden-import workbook_io --hidden-import workbook_layout --hidden-import workbook_preview --hidden-import workbook_document --hidden-import result_quality `
     tools_main.py
 Assert-NativeExit "Сборка скриптов"
 if (Test-Path dist\MonitoringPrices\tools) { Remove-Item -Recurse -Force dist\MonitoringPrices\tools }

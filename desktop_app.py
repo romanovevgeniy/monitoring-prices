@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QVBoxLayout, QWidget,
 )
 
+from result_quality import failure_message
 from paths import APP_DIR, FROZEN  # noqa: E402
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--selftest":  # проверка сборки: Qt загружается, окно создаётся
@@ -211,14 +212,14 @@ class PathLabel(QLabel):
 
 class StoreRow:
     def __init__(self, grid, row, name, total):
-        self.name, self.total, self.ok, self.missing, self.errors = name, total, 0, 0, 0
+        self.name, self.total, self.ok, self.missing, self.errors, self.skipped = name, total, 0, 0, 0, 0
         self.title = QLabel(name)
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
         self.bar.setMaximum(max(total, 1))
         self.count = QLabel()
         self.count.setObjectName("muted")
-        self.labels = [QLabel() for _ in range(3)]
+        self.labels = [QLabel() for _ in range(4)]
         for col, w in enumerate([self.title, self.bar, self.count] + self.labels):
             grid.addWidget(w, row, col)
         self.update()
@@ -230,17 +231,19 @@ class StoreRow:
             self.ok += 1
         elif status == "ошибка":
             self.errors += 1
-        else:
+        elif status == 'нет':
             self.missing += 1
+        else:
+            self.skipped += 1
         self.update()
 
     def update(self):
-        done = self.ok + self.missing + self.errors
+        done = self.ok + self.missing + self.errors + self.skipped
         self.bar.setValue(done)
         self.count.setText(f"{done}/{self.total}")
         for lab, (n, sym, color, tip) in zip(self.labels, [
             (self.ok, "✓", GREEN, "Найдено"), (self.missing, "–", GRAY, "Нет в наличии"),
-            (self.errors, "⚠", ORANGE, "Ошибка")]):
+            (self.errors, "⚠", ORANGE, "Ошибка"), (self.skipped, "?", ORANGE, "Не проверено")]):
             lab.setText(f"<span style='color:{color}'>{sym}</span> {n}")
             lab.setToolTip(tip)
             lab.setEnabled(n > 0)
@@ -384,6 +387,9 @@ class MainWindow(QMainWindow):
             h.addWidget(b)
         h.addStretch()
         v.addLayout(h)
+        self.retry_failed_btn=QPushButton('Повторить ошибки')
+        self.retry_failed_btn.clicked.connect(self.retry_failed)
+        self.retry_failed_btn.hide();v.addWidget(self.retry_failed_btn,0,Qt.AlignLeft)
         self.missing_btn = QPushButton()
         self.missing_btn.setFlat(True)
         self.missing_btn.setStyleSheet("text-align:left; border:none; padding:0")
@@ -596,11 +602,21 @@ class MainWindow(QMainWindow):
                 self.launch("make_links", ["--file", str(self.source)] + self.root_args(),
                             then=self.start_prices)
 
+    def retry_failed(self):
+        if not self.can_start() or not self.wizard.preview.save():return
+        data=self.wizard.preview.snapshot
+        if not data or not data.get('retryPairs'):return
+        report=self.wizard.preview.path
+        self.mode='prices';self.begin('running')
+        stores=self.selected_stores()
+        self.launch('run',['--json','--file',str(self.source)]+self.root_args()+
+            ['--template',self.active_template(),'--stores',','.join(stores),'--retry-report',str(report)],then=self.finish_run)
+
     def start_prices(self, code):
         if self.phase == "stopping":
             return self.end("stopped")
         if code != 0:
-            self.fail_message, self.crashed = "Не удалось обновить файл ссылок", True
+            self.fail_message, self.crashed = self.fail_message or "Не удалось обновить файл ссылок. Проверьте права на папку.", True
             return self.end("failed")
         self.phase = "running"
         self.refresh()
@@ -675,7 +691,16 @@ class MainWindow(QMainWindow):
                 self.handle(line.decode("utf-8", "replace").rstrip("\r"))
 
         p.readyReadStandardOutput.connect(read)
-        p.finished.connect(lambda code, _status: (read(), then(code)))
+        completed={'value':False}
+        def finish(code):
+            if completed['value']:return
+            completed['value']=True;read();then(code)
+        def process_error(error):
+            if error==QProcess.FailedToStart:
+                self.fail_message='Не удалось запустить служебный процесс. Проверьте установку программы и разрешения антивируса.'
+                self.crashed=True;finish(-1)
+        p.errorOccurred.connect(process_error)
+        p.finished.connect(lambda code,_status:finish(code))
         self.process = p
         p.start()
 
@@ -693,7 +718,9 @@ class MainWindow(QMainWindow):
         elif code == 0:
             self.end("finished")
         else:
-            self.fail_message = f"Прервалось с ошибкой (код {code})"
+            if not self.fail_message:
+                info=failure_message('\n'.join(self.tail))
+                self.fail_message=info['message']+' '+info['action']
             self.crashed = True
             self.end("failed")
 
@@ -720,7 +747,12 @@ class MainWindow(QMainWindow):
         except ValueError:
             return
         kind = ev.get("type")
-        if kind == "plan":
+        if kind == 'failure':
+            self.fail_message=(ev.get('message') or 'Не удалось завершить сбор.')+' '+(ev.get('action') or 'Откройте журнал для подробностей.')
+            self.crashed=True
+        elif kind == 'notice':
+            self.notices.append(ev.get('message',''))
+        elif kind == "plan":
             self.total = ev.get("total", 0)
             for s in ev.get("stores", []):  # второй план (после обновления ссылок) — строки ниже прежних
                 self.stores[s["name"]] = StoreRow(self.stores_grid, len(self.stores), s["name"], s["total"])
@@ -914,7 +946,7 @@ class MainWindow(QMainWindow):
             color = ORANGE if self.errors else GREEN
         else:
             title = (f"Готово. Ошибок: {self.errors} — там остались старые значения, см. лог" if self.errors
-                     else "Готово, ошибок нет")
+                     else "Выбранные проверки завершены, ошибок нет")
             color = ORANGE if self.errors else GREEN
         self.result_title.setText(title)
         self.result_title.setStyleSheet(f"color:{color}")

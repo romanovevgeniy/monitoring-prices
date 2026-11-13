@@ -24,7 +24,7 @@ class PreviewTests(unittest.TestCase):
     def test_all_stores_and_filter(self):
         data=preview(self.path,'all',stores=['dns'])
         self.assertEqual([c['key'] for c in data['columns']],['dns'])
-        self.assertEqual(data['rows'][0]['lower'],[True])
+        self.assertEqual(data['rows'][0]['lower'],[False])  # без проверки цена не участвует в сравнении
         self.assertIn('90',data['rows'][0]['prices'][0])
 
     def test_save_multiple_changes_with_original_layout(self):

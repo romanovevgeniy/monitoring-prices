@@ -425,7 +425,7 @@ private struct ResultBanner: View {
             } else if runner.errorCount > 0 {
                 "Готово. Ошибок: \(runner.errorCount) — там остались старые значения, см. лог"
             } else {
-                "Готово, ошибок нет"
+                "Выбранные проверки завершены, ошибок нет"
             }
         }
     }
@@ -480,6 +480,7 @@ private struct StoreRow: View {
             CountBadge(count: store.ok, symbol: "checkmark.circle.fill", color: .green, help: "Найдено")
             CountBadge(count: store.missing, symbol: "minus.circle.fill", color: .secondary, help: "Нет в наличии")
             CountBadge(count: store.errors, symbol: "exclamationmark.triangle.fill", color: .orange, help: "Ошибка")
+            CountBadge(count: store.skipped, symbol: "questionmark.circle", color: .orange, help: "Не проверено")
         }
         .accessibilityElement(children: .combine)
     }
@@ -562,6 +563,7 @@ private struct FeedRow: View {
         case .ok: "checkmark.circle.fill"
         case .missing: "minus.circle.fill"
         case .error: "exclamationmark.triangle.fill"
+        case .skipped: "questionmark.circle"
         }
     }
 
@@ -570,6 +572,7 @@ private struct FeedRow: View {
         case .ok: .green
         case .missing: .secondary
         case .error: .orange
+        case .skipped: .orange
         }
     }
 }

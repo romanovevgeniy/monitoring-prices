@@ -41,11 +41,11 @@ def preview(path, template='all', stores=None):
                 value=doc.displayed_value(ws.title,row,cell.column) if is_source_price else None
                 prices.append(format_value(value,cell.number_format) if value is not None else '—')
                 price_n,base_n=as_number(value),as_number(base)
-                lower.append(bool(base_n and price_n is not None and price_n<base_n))
                 status=cell_status(records.get((article,store)),value) if is_source_price else cell_status(None,None)
                 statuses.append(status)
+                lower.append(bool(status['code']=='fresh' and base_n and base_n>0 and price_n is not None and price_n>0 and price_n<base_n))
                 if status['code']=='error':retry.append({'article':article,'store':store})
-                if status['code']=='fresh' and base_n and base_n>0 and price_n is not None:
+                if status['code']=='fresh' and base_n and base_n>0 and price_n is not None and price_n>0:
                     difference=max(difference,base_n-price_n)
             rows.append({'row':row,'article':article,'base':number_text(base),
                          'baseDisplay':format_value(base,ws[f"{table['base_col']}{row}"].number_format) if as_number(base) is not None else number_text(base) or '—',

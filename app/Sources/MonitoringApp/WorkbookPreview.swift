@@ -7,6 +7,24 @@ struct PreviewColumn: Decodable, Identifiable {
     var id: String { key }
 }
 
+struct PriceVerification: Decodable {
+    let code: String
+    let label: String
+    let checkedAt: String
+    let message: String
+}
+
+struct ComparisonSummary: Decodable {
+    let total: Int
+    let updated: Int
+    let cheaper: Int
+    let errors: Int
+    let unconfirmed: Int
+    let maxDifference: Double
+}
+
+struct RetryPair: Decodable { let article: String; let store: String }
+
 struct PreviewRow: Decodable, Identifiable {
     let row: Int
     let article: String
@@ -14,6 +32,9 @@ struct PreviewRow: Decodable, Identifiable {
     let baseDisplay: String
     let prices: [String]
     let lower: [Bool]
+    let statuses: [PriceVerification]
+    let cheaper: Bool
+    let difference: Double
     var id: Int { row }
 }
 
@@ -25,6 +46,8 @@ struct PreviewSnapshot: Decodable {
     let columns: [PreviewColumn]
     let rows: [PreviewRow]
     let count: Int
+    let summary: ComparisonSummary
+    let retryPairs: [RetryPair]
 }
 
 private struct PreviewFailure: Decodable { let error: String }
@@ -33,6 +56,17 @@ private struct PriceChanges: Encodable { let fingerprint: String; let edits: [Pr
 
 @Observable
 final class WorkbookPreview {
+    var filter = "all"
+    var visibleRows: [PreviewRow] {
+        (snapshot?.rows ?? []).filter { row in
+            switch filter {
+            case "cheaper": row.cheaper
+            case "errors": row.statuses.contains { $0.code == "error" }
+            case "unconfirmed": row.statuses.contains { !["fresh", "unavailable"].contains($0.code) }
+            default: true
+            }
+        }
+    }
     private(set) var snapshot: PreviewSnapshot?
     private(set) var file: URL?
     private(set) var isLoading = false

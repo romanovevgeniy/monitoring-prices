@@ -50,3 +50,63 @@ class RetryQualityTests(unittest.TestCase):
         write_report(table,self.source,new,{(3,'samsungstore'):Result(66)},previous_source=old)
         w=openpyxl.load_workbook(new)
         self.assertEqual([w.active['B3'].value,w.active['B4'].value],[66,88]);self.assertEqual(w.active.max_column,3);w.close()
+
+class AllFailuresTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_store_errors_replace_previous_fresh_status(self):
+        import shutil
+        from contextlib import asynccontextmanager
+        from datetime import datetime
+        import layout
+        from workbook_preview import preview
+        @asynccontextmanager
+        async def no_browser():yield None
+        async def fail_all(store,items,*args,**kwargs):
+            for item in items:
+                kwargs['outcomes'][item[0],item[2],store]=dict(status='error',note='timeout',checkedAt=datetime.now().astimezone().isoformat())
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);source=root/'tv.xlsx'
+            w=openpyxl.Workbook();w.active.append(['Артикул','Мвидео','DNS','Ozon','Wildberries','НОСИМО']);w.active.append([None]);w.active.append(['A',80,90,95,99,100]);w.save(source)
+            table=apply_template(detect_table(source),'all');destination=layout.table_dir(root/'out','ТВ')/source.name
+            destination.parent.mkdir(parents=True);shutil.copy2(source,destination)
+            save_report(destination,'ТВ','all',source,[dict(article='A',store='mvideo',status='ok',value=80,note='',checkedAt=datetime.now().astimezone().isoformat())])
+            args=argparse.Namespace(file=str(source),root=str(root/'out'),out=None,template='all',tables=None,stores=['mvideo'],articles=None,limit=None,no_links_refresh=True,retry_report=None,links=None,legacy_links=None,stop_file=None)
+            jobs={'mvideo':[('ТВ',3,'A','https://example.test',100,None)]}
+            with patch.object(run,'selected_tables',return_value=[table]),patch.object(run,'build_jobs',return_value=jobs),patch.object(run,'load_all_links',return_value={}),patch.object(run,'STORE_IMPL',{'mvideo':(None,False,'link')}),patch.object(run,'async_playwright',no_browser),patch.object(run,'run_store',fail_all),patch.object(run,'screenshot',new=AsyncMock()):
+                await run.main(args)
+            data=preview(destination,stores=['mvideo'])
+            self.assertEqual(data['rows'][0]['statuses'][0]['code'],'error')
+            self.assertEqual(len(data['retryPairs']),1)
+
+    async def test_missing_links_are_pending_and_do_not_open_browser(self):
+        from contextlib import asynccontextmanager
+        from workbook_preview import preview
+        import layout
+        class BrowserMustNotStart:
+            async def launch_persistent_context(self,*args,**kwargs):raise AssertionError('No browser for missing links')
+        @asynccontextmanager
+        async def playwright_stub():yield argparse.Namespace(chromium=BrowserMustNotStart())
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);source=root/'tv.xlsx'
+            w=openpyxl.Workbook();w.active.append(['Артикул','Мвидео','DNS','Ozon','Wildberries','НОСИМО']);w.active.append([None]);w.active.append(['A',80,90,95,99,100]);w.save(source)
+            table=apply_template(detect_table(source),'all')
+            save_report(source,'ТВ','all',source,[dict(article='A',store='mvideo',status='ok',value=80,note='',checkedAt=datetime.now().astimezone().isoformat())])
+            args=argparse.Namespace(file=str(source),root=str(root/'out'),out=None,template='all',tables=None,stores=['mvideo'],articles=None,limit=None,no_links_refresh=True,retry_report=None,links=None,legacy_links=None,stop_file=None)
+            with patch.object(run,'selected_tables',return_value=[table]),patch.object(run,'load_all_links',return_value={}),patch.object(run,'async_playwright',playwright_stub),patch.object(run,'screenshot',new=AsyncMock()):
+                await run.main(args)
+            dest=layout.table_dir(root/'out','ТВ')/source.name
+            self.assertTrue(dest.exists())
+            self.assertEqual(preview(dest,stores=['mvideo'])['rows'][0]['statuses'][0]['code'],'pending')
+
+class ShiftedColumnTests(unittest.TestCase):
+    def test_spb_status_uses_destination_columns(self):
+        from tv_report import write_report
+        from stores import Result
+        from result_quality import write_run_report
+        from workbook_preview import preview
+        with tempfile.TemporaryDirectory() as folder:
+            source=Path(folder)/'source.xlsx';dest=Path(folder)/'dest.xlsx'
+            w=openpyxl.Workbook();w.active['B1']='Артикул';w.active['D1']='Мвидео';w.active['H1']='НОСИМО';w.active['B3']='A';w.active['H3']=100
+            w.active['E1']='DNS';w.active['F1']='Ozon';w.active['G1']='Wildberries';w.save(source)
+            t=apply_template(detect_table(source),'tv-spb');write_report(t,source,dest,{(3,'samsungstore'):Result(80)})
+            write_run_report(t,source,dest,{'samsungstore':[('ТВ',3,'A',None,100,None)]},{('ТВ','A','samsungstore'):dict(status='ok',note='',checkedAt=datetime.now().astimezone().isoformat())})
+            self.assertEqual(preview(dest,'tv-spb')['rows'][0]['statuses'][0]['code'],'fresh')

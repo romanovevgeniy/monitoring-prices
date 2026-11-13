@@ -69,6 +69,9 @@ jobs:
           .venv/bin/python -c "import openpyxl; w=openpyxl.Workbook(); w.active.append(['Артикул','Розничная цена samsungstore СПБ','НОСИМО']); w.active.append([None]); w.active.append(['TEST',80,100]); w.save('/tmp/preview.xlsx')"
           "dist/mac.noindex/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" preview --file /tmp/preview.xlsx --template tv-spb > /tmp/preview.json
           .venv/bin/python -c "import json; p=json.load(open('/tmp/preview.json')); assert p['count']==1 and p['rows'][0]['article']=='TEST'"
+          .venv/bin/python -c "from datetime import datetime; from result_quality import save_report; save_report('/tmp/preview.xlsx','ТВ','tv-spb','/tmp/preview.xlsx',[dict(article='TEST',store='samsungstore',status='ok',value=80,checkedAt=datetime.now().astimezone().isoformat(),note='')])"
+          "dist/mac.noindex/Мониторинг цен.app/Contents/Resources/tools/monitoring-tools/monitoring-tools" preview --file /tmp/preview.xlsx --template tv-spb > /tmp/verified-preview.json
+          .venv/bin/python -c "import json; p=json.load(open('/tmp/verified-preview.json')); assert p['summary']['cheaper']==1 and p['rows'][0]['statuses'][0]['code']=='fresh'"
       - uses: actions/upload-artifact@v7
         with:
           name: mac

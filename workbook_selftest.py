@@ -67,5 +67,17 @@ def run_selftest():
                 raise RuntimeError('Пошаговый интерфейс не сохранил НОСИМО')
         finally:
             wb.close()
+        from datetime import datetime
+        from result_quality import save_report
+        record=dict(article='TEST',store='samsungstore',status='ok',value=80,note='',checkedAt=datetime.now().astimezone().isoformat())
+        save_report(window.source,'ТВ','tv-spb',window.source,[record])
+        window.wizard.reload()
+        if window.wizard.preview.snapshot['summary']['cheaper'] != 1:
+            raise RuntimeError('Итог свежих цен не рассчитан')
+        record['status']='error';record['note']='timeout'
+        save_report(window.source,'ТВ','tv-spb',window.source,[record])
+        window.wizard.reload()
+        if not window.wizard.preview.snapshot['retryPairs'] or window.wizard.preview.snapshot['summary']['cheaper']:
+            raise RuntimeError('Ошибочная цена учтена как свежая')
         window.close()
     return app

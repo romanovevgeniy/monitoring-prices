@@ -35,6 +35,7 @@ from stores import STORE_IMPL, Result, StoreError, make_http_client
 
 from paths import DATA_DIR as ROOT, PROFILE_DIR, RESULTS_DIR  # noqa: E402  (рабочие файлы: проект или папка пользователя)
 DELAY = {"http": (1, 2.5), "browser": (2, 5)}
+MISSING_LINK = "__monitoring_missing_link__"
 JSON_EVENTS = False  # --json: события прогресса строками "@@{...}" для приложения "Мониторинг цен"
 
 
@@ -176,7 +177,7 @@ def build_jobs(args, links, tables):
                     mode, url = "search", None
                 if mode == "link" and not url:
                     missing.append(f"{t['name']}: {article} — {STORES[store]}")
-                    continue  # нет ссылки — ячейку не трогаем
+                    url = MISSING_LINK  # фиксируем непроверенную пару, цену не трогаем
                 ref = None if t.get("template") == TV_SPB else as_number(ws[f"{col}{row}"].value) or base_old
                 jobs.setdefault(store, []).append((t["name"], row, article, url, ref, model))
     if missing:
@@ -230,7 +231,7 @@ class Progress:
     def summary(self):
         lines = ["Итого по магазинам:"]
         for store, c in self.by_store.items():
-            lines.append(f"  {STORES[store]:<24} цен: {c['ok']:>3}   нет в наличии: {c['нет']:>3}   ошибок: {c['ошибка']:>3}")
+            lines.append(f"  {STORES[store]:<24} цен: {c['ok']:>3}   нет в наличии: {c['нет']:>3}   ошибок: {c['ошибка']:>3}   не проверено: {c['пропущено']:>3}")
         return "\n".join(lines)
 
 
@@ -269,7 +270,7 @@ async def run_store(store, items, page, http, results, log, progress, override=N
     def report(item, res, status, retry=False):
         tname, row, article, *_ = item
         if outcomes is not None:
-            outcomes[tname,article,store]=dict(status={'ok':'ok','нет':'missing','ошибка':'error'}[status],
+            outcomes[tname,article,store]=dict(status={'ok':'ok','нет':'missing','ошибка':'error','пропущено':'pending'}[status],
                 note=res.note,checkedAt=datetime.now().astimezone().isoformat(timespec='seconds'),url=res.url)
         if retry:
             progress.retried(store, status)
@@ -293,6 +294,9 @@ async def run_store(store, items, page, http, results, log, progress, override=N
 
     for item in items:
         tname, row, article, url, ref, model = item
+        if url == MISSING_LINK:
+            report(item,Result(None,'','Нет ссылки на товар. Заполните файл ссылок и запустите сбор.'),'пропущено')
+            continue
         if url == "-":  # в links.xlsx отмечено, что товара в магазине нет
             res = Result(None, "", "нет в магазине (по links.xlsx)")
             results.setdefault(tname, {})[(row, store)] = res
@@ -378,12 +382,13 @@ async def main(args):
         return
     for store, items in jobs.items():
         print(f"{labels[store]}: {len(items)} позиций")
-    results, log = ({t["name"]: {} for t in tables} if spb else {}), []
+    active_tables={item[0] for items in jobs.values() for item in items}
+    results, log = {name:{} for name in active_tables}, []
     outcomes_by_item = {}
     progress = Progress({k: len(v) for k, v in jobs.items()})
     print(f"Всего: {progress.total} проверок\n")
     emit("plan", total=progress.total, stores=[{"name": labels[k], "total": len(v)} for k, v in jobs.items()])
-    need_browser = any(STORE_IMPL[s][1] for s in jobs)
+    need_browser = any(STORE_IMPL[s][1] and any(item[3]!=MISSING_LINK for item in items) for s,items in jobs.items())
     async with make_http_client() as http, async_playwright() as pw:
         ctx = None
         if need_browser:
@@ -399,7 +404,7 @@ async def main(args):
             return await site.find(article)
 
         for store, items in jobs.items():
-            page = await ctx.new_page() if STORE_IMPL[store][1] else None
+            page = await ctx.new_page() if ctx and STORE_IMPL[store][1] else None
             tasks.append(asyncio.create_task(run_store(store, items, page, http, results, log, progress,
                                                             override=fetch_spb if spb else None,
                                                             display_name=labels[store],outcomes=outcomes_by_item)))

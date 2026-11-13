@@ -74,3 +74,14 @@ class QualityTests(unittest.TestCase):
         for text in ['PermissionError: access denied','неверный регион samsungstore: msk','TimeoutError','ссылка на другой товар','RuntimeError: unusual failure']:
             message=failure_message(text)
             self.assertTrue(message['message']);self.assertTrue(message['action'])
+
+    def test_changed_result_is_rejected_before_retry(self):
+        self.report([self.entry(status='error')])
+        w=openpyxl.load_workbook(self.path);w.active['B3']=79;w.save(self.path);w.close()
+        with self.assertRaisesRegex(ValueError,'измен'):retry_pairs(self.path,self.path,'all')
+
+    def test_error_price_is_not_red_in_preview(self):
+        self.report([self.entry(status='error')])
+        self.assertEqual(preview(self.path,stores=['mvideo'])['rows'][0]['lower'],[False])
+        self.report([self.entry()])
+        self.assertEqual(preview(self.path,stores=['mvideo'])['rows'][0]['lower'],[True])
