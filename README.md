@@ -8,9 +8,9 @@
 
 М.Видео · DNS · МТС · samsungstore · Ozon · Wildberries
 
-### [⬇ Скачать для Windows](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-Windows-Setup.exe) &nbsp;·&nbsp; [⬇ Скачать для Mac](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-macOS.dmg)
+### [⬇ Скачать для Windows](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-Windows-Setup.exe) &nbsp;·&nbsp; [⬇ Скачать для Mac](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-macOS.dmg)
 
-<sub>Все версии и что в них нового — на странице <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases">Releases</a></sub>
+<sub>Текущая версия: <b>1.4.0</b> · <a href="https://github.com/romanovevgeniy/monitoring-prices/releases">Все версии</a> · Зеркало GitLab: <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-Windows-Setup.exe">Windows</a> / <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-macOS.dmg">macOS</a></sub>
 
 </div>
 
@@ -33,13 +33,13 @@
 <tr><th width="50%">Windows 10 / 11</th><th>macOS 26 и новее (Apple Silicon)</th></tr>
 <tr valign="top"><td>
 
-1. Скачайте [`MonitoringPrices-Windows-Setup.exe`](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-Windows-Setup.exe) и запустите.
+1. Скачайте [`MonitoringPrices-Windows-Setup.exe`](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-Windows-Setup.exe) и запустите.
 2. Если Windows покажет «Windows защитила ваш компьютер» — **Подробнее → Выполнить в любом случае** (у программы нет платной цифровой подписи).
 3. С **Kaspersky** и похожими антивирусами добавьте папку программы в исключения — иначе он может заблокировать её файлы, и программа не запустится.
 
 </td><td>
 
-1. Скачайте [`MonitoringPrices-macOS.dmg`](https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-macOS.dmg), откройте и перетащите «Мониторинг цен» в «Программы».
+1. Скачайте [`MonitoringPrices-macOS.dmg`](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-macOS.dmg), откройте и перетащите «Мониторинг цен» в «Программы».
 2. При первом запуске macOS скажет, что не может проверить разработчика: **Системные настройки → Конфиденциальность и безопасность → «Всё равно открыть»** (у программы нет подписи Apple).
 
 </td></tr>
@@ -133,10 +133,10 @@ CLI без `--template` сохраняет прежнее поведение (`a
 
 ### Сборка и релиз
 
-- **Релиз** — одна команда: `./release.sh 1.3.0`. Тег уходит на GitHub и GitLab, GitHub Actions ([`build.yml`](.github/workflows/build.yml)) собирает оба установщика (Windows-установщик проверяется установкой и запуском на настоящей Windows) и публикует релиз на GitHub, затем те же файлы выкладываются релизом на GitLab. Описание релиза — `.github/release-notes/v1.3.0.md`. Ссылки «Скачать» выше всегда ведут на последний релиз.
-- **Если Actions недоступны**: `./release.sh 1.3.0 --local` — всё собирается на этом Mac (Windows — через Wine, `build_windows_wine.sh`).
+- **Релиз** — одна команда: `./release.sh 1.4.0`. Тег уходит на GitHub и GitLab, GitHub Actions ([`build.yml`](.github/workflows/build.yml)) собирает оба установщика (Windows-установщик проверяется установкой и запуском на настоящей Windows) и публикует релиз на GitHub, затем те же файлы выкладываются релизом на GitLab. Описание релиза — `.github/release-notes/v1.4.0.md`. Ссылки «Скачать» выше всегда ведут на последний релиз.
+- **Если Actions недоступны**: `./release.sh 1.4.0 --local` — всё собирается на этом Mac (Windows — через Wine, `build_windows_wine.sh`).
 - **Проверочная сборка** без релиза: GitHub → Actions → «Сборка» → Run workflow (файлы — в Artifacts).
-- **Локально по отдельности**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows на Mac — `APP_VERSION=1.3.0 ./build_windows_wine.sh`; на Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
+- **Локально по отдельности**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows на Mac — `APP_VERSION=1.4.0 ./build_windows_wine.sh`; на Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
 
 ### Файлы
 
