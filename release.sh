@@ -1,14 +1,14 @@
 #!/bin/zsh
 # Выпуск версии одной командой — на GitHub и GitLab одни и те же установщики.
-#   ./release.sh 1.4.0           сборка в GitHub Actions (Windows проверяется на настоящей Windows), затем копия на GitLab
-#   ./release.sh 1.4.0 --local   сборка на этом Mac (Windows — через Wine), если Actions недоступны
-# Описание релиза — .github/release-notes/v1.4.0.md (если есть).
+#   ./release.sh 1.5.0           сборка в GitHub Actions (Windows проверяется на настоящей Windows), затем копия на GitLab
+#   ./release.sh 1.5.0 --local   сборка на этом Mac (Windows — через Wine), если Actions недоступны
+# Описание релиза — .github/release-notes/v1.5.0.md (если есть).
 # Основные ссылки README: GitHub …/releases/latest/download/<файл>; GitLab — зеркало.
 # Нужно: gh auth login, glab auth login; рабочая копия без незакоммиченных изменений.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION=${1:?Использование: ./release.sh 1.4.0 [--local]}
+VERSION=${1:?Использование: ./release.sh 1.5.0 [--local]}
 LOCAL=${2:-}
 TAG="v$VERSION"
 GITLAB_PROJECT="romanov.evgeniy86%2Fmonitoring-prices"

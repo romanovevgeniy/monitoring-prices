@@ -10,7 +10,7 @@
 
 ### [⬇ Скачать для Windows](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-Windows-Setup.exe) &nbsp;·&nbsp; [⬇ Скачать для Mac](https://github.com/romanovevgeniy/monitoring-prices/releases/latest/download/MonitoringPrices-macOS.dmg)
 
-<sub>Текущая версия: <b>1.4.0</b> · <a href="https://github.com/romanovevgeniy/monitoring-prices/releases">Все версии</a> · Зеркало GitLab: <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-Windows-Setup.exe">Windows</a> / <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-macOS.dmg">macOS</a></sub>
+<sub>Текущая версия: <b>1.5.0</b> · <a href="https://github.com/romanovevgeniy/monitoring-prices/releases">Все версии</a> · Зеркало GitLab: <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-Windows-Setup.exe">Windows</a> / <a href="https://gitlab.com/romanov.evgeniy86/monitoring-prices/-/releases/permalink/latest/downloads/MonitoringPrices-macOS.dmg">macOS</a></sub>
 
 </div>
 
@@ -143,10 +143,10 @@ CLI без `--template` сохраняет прежнее поведение (`a
 
 ### Сборка и релиз
 
-- **Релиз** — одна команда: `./release.sh 1.4.0`. Тег уходит на GitHub и GitLab, GitHub Actions ([`build.yml`](.github/workflows/build.yml)) собирает оба установщика (Windows-установщик проверяется установкой и запуском на настоящей Windows) и публикует релиз на GitHub, затем те же файлы выкладываются релизом на GitLab. Описание релиза — `.github/release-notes/v1.4.0.md`. Ссылки «Скачать» выше всегда ведут на последний релиз.
-- **Если Actions недоступны**: `./release.sh 1.4.0 --local` — всё собирается на этом Mac (Windows — через Wine, `build_windows_wine.sh`).
+- **Релиз** — одна команда: `./release.sh 1.5.0`. Тег уходит на GitHub и GitLab, GitHub Actions ([`build.yml`](.github/workflows/build.yml)) собирает оба установщика (Windows-установщик проверяется установкой и запуском на настоящей Windows) и публикует релиз на GitHub, затем те же файлы выкладываются релизом на GitLab. Описание релиза — `.github/release-notes/v1.5.0.md`. Ссылки «Скачать» выше всегда ведут на последний релиз.
+- **Если Actions недоступны**: `./release.sh 1.5.0 --local` — всё собирается на этом Mac (Windows — через Wine, `build_windows_wine.sh`).
 - **Проверочная сборка** без релиза: GitHub → Actions → «Сборка» → Run workflow (файлы — в Artifacts).
-- **Локально по отдельности**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows на Mac — `APP_VERSION=1.4.0 ./build_windows_wine.sh`; на Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
+- **Локально по отдельности**: Mac — `./build_dmg.sh` → `dist/Мониторинг цен.dmg`; Windows на Mac — `APP_VERSION=1.5.0 ./build_windows_wine.sh`; на Windows — `powershell -ExecutionPolicy Bypass -File build_windows.ps1` (Python 3.12 + Inno Setup 6).
 
 ### Файлы
 
