@@ -26,6 +26,7 @@ from excel import as_number, article_rows, detect_table, write_table
 from monitoring_templates import apply_template, TV_SPB
 from samsung_tv import SamsungTV
 from tv_report import write_report
+from result_quality import retry_pairs, write_run_report, failure_message
 import layout
 from make_links_template import link_stores
 from screenshot import screenshot
@@ -132,6 +133,18 @@ def output_dir(args):
 def build_jobs(args, links, tables):
     """Задания: магазин -> [(таблица, строка, артикул, url, ориентир_цены, модель)]."""
     jobs, missing = {}, []
+    retry_book=getattr(args,'retry_report',None)
+    pairs=None
+    if retry_book:
+        if not args.file or len(tables)!=1 or args.articles or args.limit:
+            raise ValueError('Повтор требует одну исходную таблицу без дополнительных фильтров артикулов.')
+        pairs=retry_pairs(retry_book,args.file,getattr(args,'template','all'))
+        t=tables[0]
+        book=openpyxl.load_workbook(t['file'],read_only=True)
+        try: articles=set(article_rows(book.active,t))
+        finally: book.close()
+        if any(name!=t['name'] or article not in articles or store not in t['price_cols'] for name,article,store in pairs):
+            raise ValueError('В отчёте повтора неизвестный артикул или магазин. Запустите новый сбор.')
     for t in tables:
         ws = openpyxl.load_workbook(t["file"]).active
         article_rows(ws, t)
@@ -152,6 +165,8 @@ def build_jobs(args, links, tables):
             base_old = as_number(ws[f"{base_col}{row}"].value)
             for store, col in t["price_cols"].items():
                 if args.stores and store not in args.stores:
+                    continue
+                if pairs is not None and (t['name'],article,store) not in pairs:
                     continue
                 _, _, mode = STORE_IMPL[store]
                 url = row_links.get(store)
@@ -242,7 +257,7 @@ async def fetch(func, target, url, article, ref, model):
     return await func(target, url=url, article=article, ref_price=ref, model=model)
 
 
-async def run_store(store, items, page, http, results, log, progress, override=None, display_name=None):
+async def run_store(store, items, page, http, results, log, progress, override=None, display_name=None, outcomes=None):
     display_name = display_name or STORES[store]
     func, needs_browser, _ = STORE_IMPL[store]
     lo, hi = DELAY["browser" if needs_browser else "http"]
@@ -253,6 +268,9 @@ async def run_store(store, items, page, http, results, log, progress, override=N
 
     def report(item, res, status, retry=False):
         tname, row, article, *_ = item
+        if outcomes is not None:
+            outcomes[tname,article,store]=dict(status={'ok':'ok','нет':'missing','ошибка':'error'}[status],
+                note=res.note,checkedAt=datetime.now().astimezone().isoformat(timespec='seconds'),url=res.url)
         if retry:
             progress.retried(store, status)
         line = progress.line() if retry else progress.tick(store, status)
@@ -299,6 +317,9 @@ async def run_store(store, items, page, http, results, log, progress, override=N
             if status == "ошибка":
                 if retryable(res):
                     still.append(item)
+                if outcomes is not None:
+                    outcomes[item[0],item[2],store]=dict(status='error',note=res.note,
+                        checkedAt=datetime.now().astimezone().isoformat(timespec='seconds'),url=res.url)
             else:
                 report(item, res, status, retry=True)
             await asyncio.sleep(random.uniform(lo, hi))
@@ -358,6 +379,7 @@ async def main(args):
     for store, items in jobs.items():
         print(f"{labels[store]}: {len(items)} позиций")
     results, log = ({t["name"]: {} for t in tables} if spb else {}), []
+    outcomes_by_item = {}
     progress = Progress({k: len(v) for k, v in jobs.items()})
     print(f"Всего: {progress.total} проверок\n")
     emit("plan", total=progress.total, stores=[{"name": labels[k], "total": len(v)} for k, v in jobs.items()])
@@ -380,7 +402,7 @@ async def main(args):
             page = await ctx.new_page() if STORE_IMPL[store][1] else None
             tasks.append(asyncio.create_task(run_store(store, items, page, http, results, log, progress,
                                                             override=fetch_spb if spb else None,
-                                                            display_name=labels[store])))
+                                                            display_name=labels[store],outcomes=outcomes_by_item)))
         stopped = False
 
         def stop():
@@ -419,9 +441,16 @@ async def main(args):
             dst = out / (f"{src.stem} — samsungstore СПБ_{stamp}.xlsx" if spb else
                          (src.name if args.out else f"{src.stem}_{stamp}{src.suffix}"))
         # Повторный запуск в тот же день дописывает в уже собранный файл (например, перепроверка отдельных магазинов)
-        changed = (write_report(t, src, dst, results[t["name"]]) if spb else
-                   write_table(t, dst if dst.exists() else src, dst, results[t["name"]], base_src_path=src))
+        changed = (write_report(t, src, dst, results[t["name"]], previous_source=getattr(args,"retry_report",None)) if spb else
+                   write_table(t, dst if dst.exists() else (getattr(args,"retry_report",None) or src), dst, results[t["name"]], base_src_path=src))
         print(f"Сохранено: {dst}  (изменено ячеек: {changed})")
+        try:
+            write_run_report(t,src,dst,jobs,outcomes_by_item,previous_source=getattr(args,'retry_report',None))
+        except Exception as error:
+            # Старые метаданные не должны подтверждать новый файл, если их запись сорвалась.
+            from result_quality import report_path
+            report_path(dst).unlink(missing_ok=True)
+            emit('notice',message='Таблица сохранена, но актуальность цен не подтверждена: '+str(error))
         emit("saved", table=t["name"], path=str(dst), changed=changed)
         png = layout.screenshot_path(args.root, t["name"]) if args.root else out / "Скриншоты" / f"{dst.stem}.png"
         if args.root and spb:
@@ -457,7 +486,7 @@ async def refresh_mvideo_links(args, tables):
     """Смартфоны: перед сбором цен заново выбираем ссылки М.Видео — у продавцов маркетплейса самое дешёвое
     предложение меняется каждый день (распродано, другой продавец). False — пользователь остановил прогон."""
     phone_tables = [t for t in tables if t.get("autofill") == "phones" and "mvideo" in t["price_cols"]]
-    if (args.no_links_refresh or args.articles or args.limit or not phone_tables
+    if (getattr(args,"retry_report",None) or args.no_links_refresh or args.articles or args.limit or not phone_tables
             or (args.stores and "mvideo" not in args.stores)):
         return True
     import fill_links  # здесь, а не наверху: fill_links сам импортирует run
@@ -499,6 +528,7 @@ def parse_args():
     p.add_argument("--stores", type=lambda s: s.split(","), help=",".join(STORES))
     p.add_argument("--articles", type=lambda s: [a.strip() for a in s.split(",")])
     p.add_argument("--limit", type=int, help="не больше N артикулов из каждой таблицы")
+    p.add_argument("--retry-report", help="xlsx результата: повторить только ошибочные пары товар–магазин")
     p.add_argument("--no-links-refresh", action="store_true",
                    help="смартфоны: не обновлять ссылки М.Видео перед сбором цен")
     p.add_argument("--json", action="store_true", help="события прогресса для приложения")
@@ -521,4 +551,11 @@ if __name__ == "__main__":
         print(json.dumps({"table": t and t["name"], "stores": stores}, ensure_ascii=False))
         sys.exit(0 if t else 1)
     JSON_EVENTS = args.json
-    asyncio.run(main(args))
+    try:
+        asyncio.run(main(args))
+    except Exception as error:
+        info=failure_message(error)
+        emit('failure',**info)
+        print(info['message']+' '+info['action'],file=sys.stderr)
+        print(str(error),file=sys.stderr)
+        sys.exit(1)

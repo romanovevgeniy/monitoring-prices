@@ -13,7 +13,7 @@ COMPACT_HEADERS = ['Артикул', 'НОСИМО', 'samsungstore.ru · Сан�
 HEADER = 'Розничная цена samsungstore СПБ'
 
 
-def write_report(table, source, destination, results):
+def write_report(table, source, destination, results, previous_source=None):
     original = openpyxl.load_workbook(source, read_only=True)
     try:
         header = original.active[f"{table['price_cols']['samsungstore']}1"].value
@@ -22,8 +22,9 @@ def write_report(table, source, destination, results):
         original.close()
     previous_table = None
     previous = source
-    if Path(destination).exists():
-        wb = openpyxl.load_workbook(destination, read_only=True)
+    previous_path = destination if Path(destination).exists() else previous_source
+    if previous_path and Path(previous_path).exists():
+        wb = openpyxl.load_workbook(previous_path, read_only=True)
         try:
             headers = [c.value for c in next(wb.active.iter_rows(max_row=1))]
             if headers == COMPACT_HEADERS:
@@ -40,7 +41,7 @@ def write_report(table, source, destination, results):
                 if len(articles) != 1:
                     raise ValueError('Не найдена однозначная колонка артикула в прежнем результате СПБ')
                 previous_table = dict(table, article_col=articles[0], price_cols={'samsungstore': cols[0]})
-            previous = destination
+            previous = previous_path
         finally:
             wb.close()
     keep = [column_index_from_string(table[key]) for key in ('article_col', 'base_col')]

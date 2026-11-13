@@ -8,6 +8,7 @@ from excel import article_rows, as_number
 from excel_html import format_value
 from monitoring_templates import apply_template, TV_SPB
 from workbook_document import WorkbookDocument
+from result_quality import read_report, record_index, cell_status, comparison_summary, report_path
 
 
 def number_text(value):
@@ -25,11 +26,14 @@ def preview(path, template='all', stores=None):
         ws=doc.workbook.active
         keys=[s for s in table['price_cols'] if stores is None or s in stores]
         columns=[{'key':s,'name':'samsungstore · СПБ' if table['template']==TV_SPB else STORES[s]} for s in keys]
+        records=record_index(read_report(path),table["name"],table["template"])
         rows=[]
+        retry=[]
         for article,row in article_rows(ws,table).items():
             base_col=ws[f"{table['base_col']}{row}"].column
             base=doc.displayed_value(ws.title,row,base_col)
-            prices,lower=[],[]
+            prices,lower,statuses=[],[],[]
+            difference=0
             for store in keys:
                 col=table['price_cols'][store]
                 cell=ws[f'{col}{row}']
@@ -38,11 +42,17 @@ def preview(path, template='all', stores=None):
                 prices.append(format_value(value,cell.number_format) if value is not None else '—')
                 price_n,base_n=as_number(value),as_number(base)
                 lower.append(bool(base_n and price_n is not None and price_n<base_n))
+                status=cell_status(records.get((article,store)),value) if is_source_price else cell_status(None,None)
+                statuses.append(status)
+                if status['code']=='error':retry.append({'article':article,'store':store})
+                if status['code']=='fresh' and base_n and base_n>0 and price_n is not None:
+                    difference=max(difference,base_n-price_n)
             rows.append({'row':row,'article':article,'base':number_text(base),
                          'baseDisplay':format_value(base,ws[f"{table['base_col']}{row}"].number_format) if as_number(base) is not None else number_text(base) or '—',
-                         'prices':prices,'lower':lower})
+                         'prices':prices,'lower':lower,'statuses':statuses,'cheaper':difference>0,'difference':difference})
         return {'filename':doc.path.name,'table':table['name'],'template':table['template'],
-                'fingerprint':doc.digest.hex(),'columns':columns,'rows':rows,'count':len(rows)}
+                'fingerprint':doc.digest.hex(),'columns':columns,'rows':rows,'count':len(rows),
+                'summary':comparison_summary(rows),'retryPairs':retry,'reportPath':str(report_path(path))}
     finally:
         doc.close()
 
