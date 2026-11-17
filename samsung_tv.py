@@ -1,9 +1,9 @@
 """Каталог samsungstore.ru: только СПБ, полный артикул из карточки, без браузерного профиля."""
 import asyncio
-import json
 import re
 from urllib.parse import quote
 
+from samsung_page import page_data
 from matching import norm
 from stores import Result, StoreError
 
@@ -11,18 +11,6 @@ BASE = 'https://www.samsungstore.ru'
 CATALOG = BASE + '/catalog/televizory/'
 CITY = 'Санкт-Петербург'
 COOKIES = 'CITY_CODE=spb; CITY_NAME=' + quote(CITY)
-
-
-def page_data(html):
-    match = re.search(r'<script\b[^>]*\bid=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.S)
-    try:
-        data = json.loads(match[1]) if match else None
-        region = data['props']['props']['currentRegion']['REGION_CODE']
-        if region != 'spb':
-            raise StoreError(f'неверный регион samsungstore: {region}; требуется Санкт-Петербург')
-        return data['props']['pageProps']
-    except (KeyError, TypeError, ValueError) as e:
-        raise StoreError('не удалось подтвердить регион и данные samsungstore') from e
 
 
 def product_result(product, url):
@@ -64,11 +52,13 @@ class SamsungTV:
         current, last, total = 1, 1, None
         while current <= last:
             data = await self.get(CATALOG, params={'page': current})
-            queries = data.get('initialState', {}).get('api', {}).get('queries', {})
-            query = next((q for q in queries.values() if q.get('endpointName') == 'getProducts'), None)
-            if not query or query.get('status') != 'fulfilled':
-                raise StoreError('не получен каталог samsungstore СПБ')
-            page = query.get('data') or {}
+            page=data.get('initialProductsData')
+            if page is None:
+                queries = data.get('initialState', {}).get('api', {}).get('queries', {})
+                query = next((q for q in queries.values() if q.get('endpointName') == 'getProducts'), None)
+                if not query or query.get('status') != 'fulfilled':
+                    raise StoreError('не получен каталог samsungstore СПБ')
+                page = query.get('data') or {}
             try:
                 last = int(page['LAST_PAGE'])
                 actual = int(page['CURRENT_PAGE'])
